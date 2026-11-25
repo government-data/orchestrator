@@ -1,0 +1,152 @@
+//! What an engine module implements: its descriptor, and how it validates,
+//! runs and cancels a run. Logs, progress and the engine's own reference
+//! of a run go through the [`RunContext`].
+
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+use engine_port::{Claimed, Descriptor, LogLine, LogStream, Progress, MAX_LOG_LINE_BYTES};
+use orchestration_model::{FinalState, Interruption};
+use tokio::sync::Notify;
+
+/// A run the engine refuses before it starts (its parameters do not fit
+/// its kind): it ends `failed` with this class.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refused {
+    /// `[a-z0-9_]`, at most 64: a class, never a message.
+    pub class: String,
+}
+
+/// The engine could not do what it was asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EngineError(pub String);
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EngineError {}
+
+/// How a run ended, as the engine saw it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Outcome {
+    pub state: FinalState,
+    /// Named counts, never values.
+    pub counts: BTreeMap<String, u64>,
+    pub error_class: Option<String>,
+    pub interruption: Option<Interruption>,
+}
+
+impl Outcome {
+    #[must_use]
+    pub fn succeeded() -> Self {
+        Self {
+            state: FinalState::Succeeded,
+            counts: BTreeMap::new(),
+            error_class: None,
+            interruption: None,
+        }
+    }
+
+    #[must_use]
+    pub fn failed(class: &str) -> Self {
+        Self {
+            state: FinalState::Failed,
+            error_class: Some(class.to_string()),
+            ..Self::succeeded()
+        }
+    }
+
+    #[must_use]
+    pub fn cancelled() -> Self {
+        Self {
+            state: FinalState::Cancelled,
+            ..Self::succeeded()
+        }
+    }
+}
+
+/// A run the engine is asked to cancel: its id and the engine's reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunRef {
+    pub run: String,
+    pub engine_ref: Option<String>,
+}
+
+/// An engine, as its module implements it.
+#[async_trait]
+pub trait Engine: Send + Sync + 'static {
+    /// Engine, line, version and kinds.
+    fn descriptor(&self) -> Descriptor;
+    /// Checks a claimed run before it starts.
+    async fn validate(&self, run: &Claimed) -> Result<(), Refused>;
+    /// Runs it to its end; logs and progress through `ctx`. A cancelled run
+    /// returns [`Outcome::cancelled`].
+    async fn run(&self, run: Claimed, ctx: RunContext) -> Outcome;
+    /// Stops a run: `run` then returns soon.
+    async fn cancel(&self, run: &RunRef) -> Result<(), EngineError>;
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct Reported {
+    pub(crate) lines: Vec<LogLine>,
+    pub(crate) next_seq: u64,
+    pub(crate) progress: Option<Progress>,
+    pub(crate) engine_ref: Option<String>,
+    /// The engine reference changed since the last renewal.
+    pub(crate) ref_changed: bool,
+}
+
+/// What a running engine reports through: log lines, progress and its own
+/// reference of the run, sent at the next renewal (the reference at once).
+#[derive(Debug, Clone, Default)]
+pub struct RunContext {
+    pub(crate) state: Arc<Mutex<Reported>>,
+    pub(crate) wake: Arc<Notify>,
+}
+
+impl RunContext {
+    pub(crate) fn with_state<T>(&self, f: impl FnOnce(&mut Reported) -> T) -> T {
+        let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut guard)
+    }
+
+    /// A log line; a longer one than the port takes is cut.
+    pub fn log(&self, stream: LogStream, line: &str) {
+        let mut end = line.len().min(MAX_LOG_LINE_BYTES);
+        while !line.is_char_boundary(end) {
+            end -= 1;
+        }
+        self.with_state(|s| {
+            s.next_seq += 1;
+            let seq = s.next_seq;
+            s.lines.push(LogLine {
+                seq,
+                stream,
+                line: line[..end].to_string(),
+            });
+        });
+    }
+
+    pub fn progress(&self, fraction: Option<f64>, detail: Option<&str>) {
+        self.with_state(|s| {
+            s.progress = Some(Progress {
+                fraction,
+                detail: detail.map(str::to_string),
+            });
+        });
+    }
+
+    /// The engine's own reference of the run (a query id): sent before the
+    /// engine goes on, so that a retry can stop it first.
+    pub fn engine_ref(&self, reference: &str) {
+        self.with_state(|s| {
+            s.engine_ref = Some(reference.to_string());
+            s.ref_changed = true;
+        });
+        self.wake.notify_one();
+    }
+}

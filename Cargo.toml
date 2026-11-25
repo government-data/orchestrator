@@ -14,6 +14,7 @@ repository = "https://github.com/government-data/orchestrator"
 [workspace.dependencies]
 # The orchestrator's own crates.
 engine-port = { path = "crates/engine-port" }
+engine-runner = { path = "crates/engine-runner" }
 orchestration-model = { path = "crates/orchestration-model" }
 orchestrator-postgres = { path = "crates/orchestrator-postgres" }
 orchestrator-server = { path = "crates/orchestrator-server" }
@@ -33,6 +34,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 # `croner` takes as is.
 chrono-tz = "0.10"
 croner = "3"
+# The runner's HTTP client: rustls (ring), JSON, nothing else.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 # The engine port's JSON Schemas, derived from its own types.
 schemars = { version = "1", features = ["chrono04"] }
 serde = { version = "1", features = ["derive"] }
