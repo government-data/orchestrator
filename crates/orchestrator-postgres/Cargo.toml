@@ -15,6 +15,9 @@ workspace = true
 # embedded, and the store. Runtime queries only: the build needs no
 # database.
 [dependencies]
+orchestration-model.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
 sqlx.workspace = true
 
 [dev-dependencies]

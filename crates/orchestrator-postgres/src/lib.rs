@@ -1,7 +1,14 @@
 //! The orchestrator's PostgreSQL adapter (decision 0011): its migrations,
-//! and the store the server's use cases run on. The database is the
+//! and [`PgStore`], the store the server's use cases run on. The database is the
 //! module's own, created by the agent at `module add` (quality-sdk decision
 //! 0009); its migrations only add.
+
+mod flows;
+mod store;
+
+pub use flows::NewFlow;
+pub(crate) use store::corrupt;
+pub use store::{PgStore, StoreError};
 
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
