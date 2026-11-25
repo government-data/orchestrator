@@ -4,12 +4,14 @@
 
 mod clock;
 mod http;
+mod identity;
 mod metrics;
 mod port;
 mod scheduler;
 
 pub use clock::{Clock, FixedClock, SystemClock};
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
+pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use metrics::{Metrics, RunResult};
 pub use port::{runner_of, EnginePort, Machine, PortError};
 pub use scheduler::{Scheduler, Tick, RUNNERS_FENCE};
