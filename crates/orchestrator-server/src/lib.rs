@@ -7,6 +7,7 @@ mod http;
 mod identity;
 mod metrics;
 mod port;
+mod removal;
 mod scheduler;
 mod token;
 
@@ -15,6 +16,7 @@ pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use metrics::{Metrics, RunResult};
 pub use port::{runner_of, EnginePort, Machine, PortError};
+pub use removal::{removal, RemovalAnswer, ORCHESTRATOR_MODULE};
 pub use scheduler::{Scheduler, Tick, RUNNERS_FENCE};
 pub use token::{ed25519_keys, module_of, Expected, InternalCaller, JwksKeys, KeyList, Keys};
 

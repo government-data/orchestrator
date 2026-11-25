@@ -6,6 +6,7 @@
 mod engines;
 mod flows;
 mod reaper;
+mod removal;
 mod runs;
 mod schedules;
 mod stats;
@@ -16,6 +17,7 @@ mod windows;
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
 pub use reaper::Cancelled;
+pub use removal::OnLines;
 pub use runs::{ClaimFor, NewRun, Renewal};
 pub use schedules::{NewSchedule, Schedule};
 pub use stats::{EndedRun, QueueStat};

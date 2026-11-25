@@ -97,6 +97,7 @@ impl<C: Clock> EnginePort<C> {
     pub async fn register(
         &self,
         machine: &Machine,
+        module: Option<&str>,
         engine: &EngineLine,
         d: &Descriptor,
     ) -> Result<Registered, PortError> {
@@ -105,9 +106,11 @@ impl<C: Clock> EnginePort<C> {
         }
         d.validate()?;
         let now = self.clock.now();
-        self.store
-            .register(d, &runner_of(machine, engine), now)
-            .await?;
+        let runner = runner_of(machine, engine);
+        self.store.register(d, &runner, now).await?;
+        if let Some(module) = module {
+            self.store.record_module(engine, &runner, module).await?;
+        }
         Ok(Registered::for_port(d.port))
     }
 
@@ -209,6 +212,11 @@ impl<C: Clock> EnginePort<C> {
             HoldState::Draining
         };
         Ok(HoldAnswer { state, running })
+    }
+
+    /// Whether `module` may be removed (decision 0015).
+    pub async fn removal(&self, module: &str) -> Result<crate::RemovalAnswer, PortError> {
+        Ok(crate::removal(&self.store, crate::ORCHESTRATOR_MODULE, module).await?)
     }
 
     /// Ends a hold; releasing one that is not in force changes nothing.

@@ -6,11 +6,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{post, put};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use engine_port::{Claim, Descriptor, Finish, Hold, Logs, Release, Renew};
 use orchestration_model::{EngineLine, EngineName, Line};
@@ -125,6 +125,7 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
         .route("/internal/engines/{engine}/{line}/claim", post(claim::<C>))
         .route("/internal/engines/{engine}/hold", post(hold::<C>))
         .route("/internal/engines/{engine}/release", post(release::<C>))
+        .route("/internal/removal", get(removal::<C>))
         .route("/internal/runs/{id}/renew", post(renew::<C>))
         .route("/internal/runs/{id}/logs", post(logs::<C>))
         .route("/internal/runs/{id}/finish", post(finish::<C>))
@@ -133,12 +134,12 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
 
 async fn register<C: Clock>(
     State(s): Shared<C>,
-    Caller(m, _): Caller,
+    Caller(m, module): Caller,
     Path((engine, line)): Path<(String, String)>,
     Json(d): Json<Descriptor>,
 ) -> Result<Response, ApiError> {
     let e = engine_line(&engine, &line)?;
-    let answer = s.port.register(&m, &e, &d).await?;
+    let answer = s.port.register(&m, module.as_deref(), &e, &d).await?;
     Ok(Json(answer).into_response())
 }
 
@@ -226,4 +227,18 @@ pub fn counted(router: Router, metrics: Arc<crate::Metrics>) -> Router {
             }
         },
     ))
+}
+
+/// The check before a module's removal: `?module=<name>`.
+#[derive(Debug, serde::Deserialize)]
+pub(crate) struct RemovalQuery {
+    module: String,
+}
+
+async fn removal<C: Clock>(
+    State(s): Shared<C>,
+    Caller(..): Caller,
+    Query(q): Query<RemovalQuery>,
+) -> Result<Response, ApiError> {
+    Ok(Json(s.port.removal(&q.module).await?).into_response())
 }
