@@ -1,0 +1,107 @@
+name: CI
+
+# On every pull request, on main, every week and on a manual run: the secret
+# scan, the Rust workspace (format, file sizes, lint, tests), its
+# dependencies, and the gate `ci` that the other jobs feed. Public
+# repository: GitHub-hosted runners only, read-only token, no AWS
+# credentials.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Weekly: a vulnerability disclosed against an unchanged dependency.
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # gitleaks over the full history: a secret can come in any file.
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run gitleaks
+        env:
+          GITLEAKS_VERSION: 8.21.2
+        run: |
+          curl -sSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          ./gitleaks detect --source . --config .gitleaks.toml --redact --no-banner --verbose
+
+  # Format, file sizes, lint and tests of every crate. The integration tests
+  # that start PostgreSQL use the runner's Docker.
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Format
+        run: cargo fmt --all -- --check
+      # No Rust file past its hard limit, tests aside (functions: Clippy).
+      - name: File sizes
+        run: |
+          over=$(find crates -name '*.rs' -not -path '*/tests/*' -not -name '*_tests.rs' \
+            -exec awk 'END { if (NR > 800) print FILENAME ": " NR " lines" }' {} \;)
+          if [ -n "$over" ]; then echo "$over"; exit 1; fi
+      # The core never names an engine (decision 0011): no engine's name in
+      # its crates; an engine's own code lives in its module's folder.
+      - name: No engine name in the core
+        run: |
+          if grep -rniE 'knime|airflow|trino|python' crates --include='*.rs' --include='*.toml' --include='*.sql'; then
+            echo "an engine is named outside its module"; exit 1
+          fi
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Test
+        run: cargo test --workspace --locked -- --test-threads=2
+
+  # Vulnerabilities in the whole tree, and where each crate comes from.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        with:
+          tool: cargo-deny
+      - name: cargo-deny
+        run: cargo deny check advisories sources
+
+  # The one check to require: green when every job passed.
+  ci:
+    if: always()
+    needs: [secrets, rust, deny]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for r in $RESULTS; do
+            if [ "$r" != "success" ]; then echo "a job ended $r"; exit 1; fi
+          done
+          echo "CI passed"

@@ -1,0 +1,15 @@
+# gitleaks configuration for the CI secret scan.
+#
+# gitleaks' built-in rules, narrowed only for fake credentials in the tests.
+# A real secret anywhere else still fails the scan.
+
+title = "orchestrator secret scan"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake credentials in tests are not real secrets"
+paths = [
+  '''.*/tests/.*''',
+]
