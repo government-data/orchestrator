@@ -1,0 +1,502 @@
+{
+  "messages": {
+    "Claim": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A runner asks for a run of its engine and line.",
+      "properties": {
+        "runner": {
+          "description": "The runner, unique on its machine (several may run on one).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runner"
+      ],
+      "title": "Claim",
+      "type": "object"
+    },
+    "Claimed": {
+      "$defs": {
+        "Resume": {
+          "additionalProperties": false,
+          "description": "The run that tells the engine where the run it repeats was.",
+          "properties": {
+            "engine_ref": {
+              "description": "The engine's reference of the previous run, if it reported one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "last_detail": {
+              "description": "The previous run's last progress detail, if it reported one.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "previous_run": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "previous_run"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A run handed to a runner, under a lease.",
+      "properties": {
+        "attempt": {
+          "description": "Its attempt (the first is 1).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "flow": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "lease": {
+          "description": "The lease the runner names in every call about this run: a call with\nanother lease is refused, so an expired holder changes nothing.",
+          "type": "string"
+        },
+        "lease_until": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "parameters": {
+          "description": "The run's parameters (the flow's with the fire's over them)."
+        },
+        "resume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Resume"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "With `continue`, where the run it repeats was."
+        },
+        "run": {
+          "type": "string"
+        },
+        "timeout_secs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run",
+        "flow",
+        "kind",
+        "parameters",
+        "attempt",
+        "timeout_secs",
+        "lease",
+        "lease_until"
+      ],
+      "title": "Claimed",
+      "type": "object"
+    },
+    "Descriptor": {
+      "$defs": {
+        "RunKind": {
+          "additionalProperties": false,
+          "description": "A kind of run an engine runs, with the JSON Schema of its parameters.",
+          "properties": {
+            "name": {
+              "description": "`[a-z][a-z0-9_]`, at most 40 bytes.",
+              "type": "string"
+            },
+            "parameters": {
+              "description": "The JSON Schema (an object) a run's parameters of this kind meet."
+            }
+          },
+          "required": [
+            "name",
+            "parameters"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A runner's descriptor of its engine, sent when it starts.",
+      "properties": {
+        "concurrency": {
+          "description": "How many runs this runner runs at once.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "engine": {
+          "pattern": "^[a-z][a-z0-9-]{0,39}$",
+          "type": "string"
+        },
+        "engine_version": {
+          "description": "The engine's exact version.",
+          "type": "string"
+        },
+        "kinds": {
+          "items": {
+            "$ref": "#/$defs/RunKind"
+          },
+          "type": "array"
+        },
+        "line": {
+          "description": "The engine's major line, or `-` for an engine with one.",
+          "pattern": "^(-|[a-z0-9.]{1,16})$",
+          "type": "string"
+        },
+        "port": {
+          "description": "The port version the runner speaks.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "engine",
+        "line",
+        "engine_version",
+        "port",
+        "kinds",
+        "concurrency"
+      ],
+      "title": "Descriptor",
+      "type": "object"
+    },
+    "Finish": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A runner reports a run's end.",
+      "properties": {
+        "counts": {
+          "additionalProperties": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "default": {},
+          "description": "Named counts (rows, statements…), never values.",
+          "type": "object"
+        },
+        "error_class": {
+          "description": "The engine's class of the error (`[a-z0-9_]`, at most 64), never its\nmessage.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interruption": {
+          "default": null,
+          "description": "Why it was cut, if it did not fail by itself.",
+          "enum": [
+            "system",
+            "runner_stopped",
+            "runner_restarted",
+            "runner_lost",
+            "runner_isolated",
+            "low_disk",
+            null
+          ]
+        },
+        "lease": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "succeeded",
+            "failed",
+            "timed_out",
+            "cancelled"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease",
+        "state"
+      ],
+      "title": "Finish",
+      "type": "object"
+    },
+    "Hold": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The engine's drain hold: while it is in force the orchestrator answers\nno claim of that engine and counts what still runs.",
+      "properties": {
+        "hold": {
+          "description": "The hold's id: asking again with it extends the hold.",
+          "type": "string"
+        },
+        "until": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "hold",
+        "until"
+      ],
+      "title": "Hold",
+      "type": "object"
+    },
+    "HoldAnswer": {
+      "$defs": {
+        "HoldState": {
+          "description": "A hold's state.",
+          "oneOf": [
+            {
+              "const": "free",
+              "description": "Nothing of the engine runs: it may restart.",
+              "type": "string"
+            },
+            {
+              "const": "draining",
+              "description": "Runs of the engine are still running.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The answer to a hold.",
+      "properties": {
+        "running": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/HoldState"
+        }
+      },
+      "required": [
+        "state",
+        "running"
+      ],
+      "title": "HoldAnswer",
+      "type": "object"
+    },
+    "Logs": {
+      "$defs": {
+        "LogLine": {
+          "additionalProperties": false,
+          "description": "A numbered log line: numbers grow from 1 within a run, and a line sent\ntwice is kept once.",
+          "properties": {
+            "line": {
+              "type": "string"
+            },
+            "seq": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stream": {
+              "$ref": "#/$defs/LogStream"
+            }
+          },
+          "required": [
+            "seq",
+            "stream",
+            "line"
+          ],
+          "type": "object"
+        },
+        "LogStream": {
+          "description": "Where a log line came from.",
+          "oneOf": [
+            {
+              "enum": [
+                "stdout",
+                "stderr"
+              ],
+              "type": "string"
+            },
+            {
+              "const": "system",
+              "description": "The runner's own messages (start, timeout, cancel).",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A runner appends log lines.",
+      "properties": {
+        "lease": {
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/LogLine"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "lease",
+        "lines"
+      ],
+      "title": "Logs",
+      "type": "object"
+    },
+    "Registered": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The orchestrator's answer to a registration.",
+      "properties": {
+        "lease_secs": {
+          "description": "How long a claimed run's lease lasts.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "port": {
+          "description": "The port version both speak.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "renew_every_secs": {
+          "description": "How often the runner renews a lease while it runs.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "port",
+        "lease_secs",
+        "renew_every_secs"
+      ],
+      "title": "Registered",
+      "type": "object"
+    },
+    "Release": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The end of a hold.",
+      "properties": {
+        "hold": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "hold"
+      ],
+      "title": "Release",
+      "type": "object"
+    },
+    "Renew": {
+      "$defs": {
+        "Progress": {
+          "additionalProperties": false,
+          "description": "How far a run is.",
+          "properties": {
+            "detail": {
+              "description": "A short step name (no data), at most 200 bytes.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "fraction": {
+              "description": "0 to 1, if the engine knows.",
+              "format": "double",
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A runner renews its lease while it runs.",
+      "properties": {
+        "engine_ref": {
+          "description": "The engine's own reference of the run (a query id), stored before\nthe engine starts it, so that a retry can stop it first.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lease": {
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Progress"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "lease"
+      ],
+      "title": "Renew",
+      "type": "object"
+    },
+    "Renewed": {
+      "$defs": {
+        "RenewAction": {
+          "description": "What a runner does after a renewal.",
+          "oneOf": [
+            {
+              "const": "continue",
+              "description": "Go on.",
+              "type": "string"
+            },
+            {
+              "const": "cancel",
+              "description": "Someone cancelled it: stop the engine and finish it `cancelled`.",
+              "type": "string"
+            },
+            {
+              "const": "held",
+              "description": "The engine is held: go on with this run, claim nothing new.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The answer to a renewal.",
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/RenewAction"
+        },
+        "lease_until": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "lease_until"
+      ],
+      "title": "Renewed",
+      "type": "object"
+    }
+  },
+  "port": 1
+}

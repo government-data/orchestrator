@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use orchestration_model::{EngineName, Line};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -22,7 +23,7 @@ pub const MAX_KINDS: usize = 64;
 pub const MAX_CONCURRENCY: u32 = 64;
 
 /// A kind of run an engine runs, with the JSON Schema of its parameters.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RunKind {
     /// `[a-z][a-z0-9_]`, at most 40 bytes.
@@ -32,11 +33,13 @@ pub struct RunKind {
 }
 
 /// A runner's descriptor of its engine, sent when it starts.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Descriptor {
+    #[schemars(schema_with = "crate::schema::engine_name")]
     pub engine: EngineName,
     /// The engine's major line, or `-` for an engine with one.
+    #[schemars(schema_with = "crate::schema::line")]
     pub line: Line,
     /// The engine's exact version.
     pub engine_version: String,
@@ -134,7 +137,7 @@ impl Descriptor {
 }
 
 /// The orchestrator's answer to a registration.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Registered {
     /// The port version both speak.

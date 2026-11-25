@@ -12,8 +12,11 @@ publish = false
 workspace = true
 
 # The engine port (decision 0011): the messages between the orchestrator and
-# an engine module's runner and the version rules. Pure: no I/O.
+# an engine module's runner, their JSON Schemas and the version rules. Pure:
+# no I/O.
 [dependencies]
 orchestration-model.workspace = true
+chrono.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
