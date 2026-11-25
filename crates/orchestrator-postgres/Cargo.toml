@@ -1,0 +1,24 @@
+[package]
+name = "orchestrator-postgres"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# The orchestrator's PostgreSQL adapter (decision 0011): its migrations,
+# embedded, and the store. Runtime queries only: the build needs no
+# database.
+[dependencies]
+sqlx.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+uuid.workspace = true

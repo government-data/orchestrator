@@ -15,6 +15,7 @@ repository = "https://github.com/quality-data/orchestrator"
 # The orchestrator's own crates.
 engine-port = { path = "crates/engine-port" }
 orchestration-model = { path = "crates/orchestration-model" }
+orchestrator-postgres = { path = "crates/orchestrator-postgres" }
 schedule = { path = "crates/schedule" }
 
 # The same versions as the core's.
@@ -29,6 +30,24 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The stable random delay of a trigger.
 sha2 = "0.10"
+# PostgreSQL, with the Tokio runtime and rustls (ring), the migration
+# runner and `migrate!`'s embed macro; runtime queries only, never the
+# compile-time `query!` macros.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls-ring",
+    "postgres",
+    "migrate",
+    "macros",
+    "chrono",
+    "json",
+    "uuid",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+# Ephemeral PostgreSQL containers for the integration tests.
+testcontainers = "0.27"
+testcontainers-modules = { version = "0.15", features = ["postgres"] }
+uuid = { version = "1", features = ["v4"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
