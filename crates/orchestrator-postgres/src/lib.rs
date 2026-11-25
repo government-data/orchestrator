@@ -4,9 +4,11 @@
 //! 0009); its migrations only add.
 
 mod flows;
+mod schedules;
 mod store;
 
 pub use flows::NewFlow;
+pub use schedules::{NewSchedule, Schedule};
 pub(crate) use store::corrupt;
 pub use store::{PgStore, StoreError};
 
