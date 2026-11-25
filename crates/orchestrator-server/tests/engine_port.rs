@@ -83,9 +83,11 @@ async fn the_drain_hold_answers_draining_then_free() {
     h.register().await;
     let first = h.flow("first").await;
     let second = h.flow("second").await;
-    let run = h.queue(&first).await;
+    h.queue(&first).await;
     h.queue(&second).await;
+    // Both queued at the same instant: either may be handed out first.
     let (_, claimed) = h.claim().await;
+    let run = claimed["run"].as_str().unwrap().to_string();
     let lease = &claimed["lease"];
 
     use orchestrator_server::Clock;
