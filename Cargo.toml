@@ -17,6 +17,8 @@ repository = "https://github.com/government-data/orchestrator"
 # The orchestrator's own crates.
 engine-port = { path = "crates/engine-port" }
 engine-runner = { path = "crates/engine-runner" }
+trino-rules = { path = "modules/engine-trino/crates/trino-rules" }
+trino-runner = { path = "modules/engine-trino/crates/trino-runner" }
 orchestration-model = { path = "crates/orchestration-model" }
 orchestrator-postgres = { path = "crates/orchestrator-postgres" }
 orchestrator-server = { path = "crates/orchestrator-server" }
@@ -26,6 +28,10 @@ schedule = { path = "crates/schedule" }
 # public repository pinned by a full commit; the pin moves only in a pull
 # request of its own.
 logging = { git = "https://github.com/government-data/core", rev = "a986ba377468596dfec44d55f01e561506986216" }
+
+# Trino's client protocol, from query-trino's public repository pinned by a
+# full commit.
+trino-client = { git = "https://github.com/government-data/query-trino", rev = "61a8164e80706f28c6ae8f389373cbfb693a06aa" }
 
 # The same versions as the core's.
 # The job runner's bundle signatures (ES256), with the ring rustls uses;

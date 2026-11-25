@@ -654,6 +654,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "engine-trino-service"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "engine-runner",
+ "logging",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+ "trino-client",
+ "trino-rules",
+ "trino-runner",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3338,6 +3357,17 @@ dependencies = [
  "tracing-core",
  "tracing-log",
  "tracing-serde",
+]
+
+[[package]]
+name = "trino-client"
+version = "0.1.0"
+source = "git+https://github.com/government-data/query-trino?rev=61a8164e80706f28c6ae8f389373cbfb693a06aa#61a8164e80706f28c6ae8f389373cbfb693a06aa"
+dependencies = [
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
