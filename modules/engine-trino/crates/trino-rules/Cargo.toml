@@ -1,0 +1,19 @@
+[package]
+name = "trino-rules"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# Trino's access rules from the core's neutral grants (decision 0011; core
+# decision 0090, point 7.2): one document, merged in a fixed order. Pure:
+# no I/O.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true

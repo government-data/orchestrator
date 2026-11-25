@@ -2,7 +2,9 @@
 # opts into the shared package fields, lints and dependency versions below.
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+# Engine modules keep their own crates in their folder (the core names no
+# engine, decision 0011).
+members = ["crates/*", "modules/*/crates/*"]
 
 [workspace.package]
 edition = "2021"
