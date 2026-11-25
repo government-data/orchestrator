@@ -19,7 +19,13 @@ orchestrator-postgres = { path = "crates/orchestrator-postgres" }
 orchestrator-server = { path = "crates/orchestrator-server" }
 schedule = { path = "crates/schedule" }
 
+# The core's `logging` (JSON logs, the metrics file Alloy reads), from its
+# public repository pinned by a full commit; the pin moves only in a pull
+# request of its own.
+logging = { git = "https://github.com/government-data/core", rev = "a986ba377468596dfec44d55f01e561506986216" }
+
 # The same versions as the core's.
+prometheus-client = "0.24"
 async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }

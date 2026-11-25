@@ -3,6 +3,7 @@
 //! an engine's agent holds and releases the engine.
 
 use std::fmt;
+use std::sync::Arc;
 
 use chrono::Duration;
 use engine_port::{
@@ -13,7 +14,7 @@ use orchestration_model::{open_windows, EngineLine, EngineName};
 use orchestrator_postgres::{ClaimFor, PgStore, StoreError};
 use schedule::Calendar;
 
-use crate::Clock;
+use crate::{Clock, Metrics};
 
 /// Who calls the engine port: a machine of the installation, as its
 /// certificate names it.
@@ -72,11 +73,23 @@ pub fn runner_of(machine: &Machine, engine: &EngineLine) -> String {
 pub struct EnginePort<C> {
     store: PgStore,
     clock: C,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl<C: Clock> EnginePort<C> {
     pub fn new(store: PgStore, clock: C) -> Self {
-        Self { store, clock }
+        Self {
+            store,
+            clock,
+            metrics: None,
+        }
+    }
+
+    /// Counts the runs that end in `metrics`.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// Registers a runner's descriptor: the path's engine and line must be
@@ -173,7 +186,13 @@ impl<C: Clock> EnginePort<C> {
     pub async fn finish(&self, run: &str, f: &Finish) -> Result<(), PortError> {
         f.validate()?;
         let now = self.clock.now();
-        Ok(self.store.finish(run, f, now).await?)
+        self.store.finish(run, f, now).await?;
+        if let Some(m) = &self.metrics {
+            if let Err(e) = m.count_ended(&self.store, &[run.to_string()]).await {
+                tracing::warn!(error = %e, "metrics: a run's end was not counted");
+            }
+        }
+        Ok(())
     }
 
     /// The engine's drain hold: from now no claim of the engine is
