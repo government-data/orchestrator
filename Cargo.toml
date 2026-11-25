@@ -9,7 +9,7 @@ edition = "2021"
 rust-version = "1.90"
 license = "MIT"
 authors = ["quality-data"]
-repository = "https://github.com/quality-data/orchestrator"
+repository = "https://github.com/government-data/orchestrator"
 
 [workspace.dependencies]
 # The orchestrator's own crates.

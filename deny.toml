@@ -28,6 +28,6 @@ ignore = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-  "https://github.com/quality-data/core",
-  "https://github.com/quality-data/quality-sdk",
+  "https://github.com/government-data/core",
+  "https://github.com/government-data/quality-sdk",
 ]
