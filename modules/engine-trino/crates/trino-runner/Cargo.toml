@@ -1,0 +1,21 @@
+[package]
+name = "trino-runner"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# engine-trino's job runner (decision 0011; core decision 0090, point 2 and
+# step 20): it verifies the core's signed statement bundle, runs each
+# statement on Trino with the job's token and checks its answer.
+[dependencies]
+p256.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
