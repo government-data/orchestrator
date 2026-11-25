@@ -1,0 +1,70 @@
+# The engine-trino module's manifest for quality-sdk (decisions 0002, 0009,
+# 0011 and 0013): the Trino coordinator on the master server, the rules
+# service that merges the core's grants into Trino's rules, and the job
+# runners. Its version is the module's own; a release tag is
+# `engine-trino-v` + this version. Trino's release is `trino-cluster`'s
+# version, which query-trino's workers require exactly.
+name: engine-trino
+version: 0.1.0
+
+provides:
+  capabilities:
+    # Trino's client protocol for BI and other consumers (core decision 0089).
+    - name: sql-query
+      version: 1
+      protocols: [trino-client-protocol, mtls-internal]
+    # The coordinator workers join: its version is the Trino release.
+    - name: trino-cluster
+      version: 484
+      protocols: [trino-internal]
+
+requires:
+  capabilities:
+    - name: lake
+      version: 1
+      protocols: [s3, iceberg-rest, mtls-gate]
+    - name: orchestration
+      version: 1
+      protocols: [engine-port/1]
+
+# The runners and the rules service call the engine port and the core's
+# job routes (audience `quality-jobs`) with the module's machine client
+# (decision 0009); the orchestrator records which module carries `trino`.
+oidc:
+  machine:
+    capabilities: [orchestration]
+
+# Generated once by the installation, never written by a person: the
+# coordinator's internal shared secret (the core hands it to trino-worker
+# machines over mTLS) and its lake user's keys (the lake adapter makes the
+# user). Trino runs as uid 1000.
+secrets:
+  uid: 1000
+  generate:
+    - name: trino-shared-secret
+      bytes: 32
+      critical: true
+    - name: lake-access-key
+      bytes: 16
+      critical: true
+    - name: lake-secret-key
+      bytes: 32
+      critical: true
+
+# No `topology`: every service runs on the master. Workers are query-trino's.
+
+data:
+  volumes:
+    # The sources' catalogs that `CREATE CATALOG` writes, and the rendered
+    # configuration: kept on remove, deleted only by purge.
+    - name: coordinator-data
+      service: coordinator
+      path: /data/trino
+      critical: true
+    - name: spill
+      service: coordinator
+      path: /spill
+      critical: false
+
+health:
+  services: [coordinator, lake-proxy, rules, runner]
