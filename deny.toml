@@ -16,10 +16,12 @@ version = 2
 # Unmaintained crates fail only when this workspace names them directly.
 unmaintained = "workspace"
 ignore = [
-  # chrono unmaintained: not a vulnerability, and no maintained drop-in
-  # exists; the core's own exception, with its reason. Replacing it touches
-  # every date in the code and needs its own decision. Review by 2027-02-20.
+  # chrono and chrono-tz unmaintained: not a vulnerability, and no
+  # maintained drop-in exists; the core's own exceptions, with its reason.
+  # Replacing them touches every date in the code and needs its own
+  # decision. Review by 2027-02-20.
   { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no vulnerability; replacement needs a decision; review by 2027-02-20" },
+  { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained, no vulnerability; replacement needs a decision; review by 2027-02-20" },
 ]
 
 [sources]
