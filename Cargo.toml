@@ -13,6 +13,7 @@ repository = "https://github.com/quality-data/orchestrator"
 
 [workspace.dependencies]
 # The orchestrator's own crates.
+engine-port = { path = "crates/engine-port" }
 orchestration-model = { path = "crates/orchestration-model" }
 schedule = { path = "crates/schedule" }
 
