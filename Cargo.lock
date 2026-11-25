@@ -1610,6 +1610,9 @@ dependencies = [
 name = "orchestrator-postgres"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "orchestration-model",
+ "serde_json",
  "sqlx",
  "testcontainers",
  "testcontainers-modules",
