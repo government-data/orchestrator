@@ -3,9 +3,11 @@
 //! the engine port while it has a free slot and its own guard allows it,
 //! renews each run's lease, passes a cancel on to the engine, stops a run
 //! whose lease it lost so it never runs twice, and reports its end. An
-//! engine implements [`Engine`]. It names no engine.
+//! engine implements [`Engine`]; the [`contract`] suite checks a runner and
+//! an orchestrator against each other. It names no engine.
 
 mod client;
+pub mod contract;
 mod engine;
 mod runner;
 
