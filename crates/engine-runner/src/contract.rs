@@ -1,7 +1,10 @@
 //! The engine port's contract suite (decision 0011): the same cases, with a
 //! fake engine, against any orchestrator that serves the port: this
 //! repository's server in its CI, a fake orchestrator in an engine module's.
-//! A [`Seed`] queues and cancels runs and reads their state on that side.
+//! A [`Seed`] queues and cancels runs and reads their state on that side;
+//! [`FakeOrchestrator`] is both, in memory.
+
+mod fake;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -12,6 +15,8 @@ use engine_port::{Claimed, Descriptor, LogStream, RunKind, PORT};
 use orchestration_model::{EngineName, Line};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
+
+pub use fake::{FakeOrchestrator, FakeRun};
 
 use crate::{
     Ended, Engine, EngineError, NoGuard, Orchestrator, Outcome, Refused, RunContext, RunRef, Runner,
