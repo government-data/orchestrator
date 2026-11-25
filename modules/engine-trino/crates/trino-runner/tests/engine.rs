@@ -1,0 +1,228 @@
+//! engine-trino's engine driven by engine-runner against the fake
+//! orchestrator (decision 0011 step 11's check), with a signing core and a
+//! scripted Trino: the contract suite, a job's statements in order, a
+//! refused bundle, a shape that does not fit, a transient error, the
+//! resume of a repeated attempt after its old query is ended, a cancel,
+//! and a source's previous secret.
+
+mod common;
+
+use std::time::Duration;
+
+use common::{bundle, key, public, sign, write, FakeCore, FakeTrino, Script, JOB};
+use engine_port::Resume;
+use engine_runner::contract::{run_suite, FakeOrchestrator, Seed};
+use engine_runner::{Ended, Engine, NoGuard, Runner};
+use orchestration_model::RunState;
+use serde_json::{json, Value};
+use trino_runner::{digest_hex, parameters, Credential, TrinoEngine};
+
+type Tested = Runner<TrinoEngine<FakeCore, FakeTrino>, FakeOrchestrator, NoGuard>;
+
+fn setup(
+    payload: &Value,
+    credentials: Vec<Credential>,
+) -> (Tested, FakeOrchestrator, FakeTrino, String) {
+    let k = key();
+    let signed = sign(payload, &k);
+    let digest = digest_hex(&signed.payload);
+    let trino = FakeTrino::default();
+    let core = FakeCore {
+        bundle: signed,
+        credentials,
+    };
+    let engine = TrinoEngine::new(core, trino.clone(), public(&k), "484", 2)
+        .polling_every(Duration::from_millis(10));
+    let fake = FakeOrchestrator::default();
+    let runner =
+        Runner::new(engine, fake.clone(), NoGuard, "r").renewing_every(Duration::from_millis(50));
+    (runner, fake, trino, digest)
+}
+
+async fn drive(runner: &Tested) -> Ended {
+    runner.register().await.unwrap();
+    let task = runner
+        .claim_once()
+        .await
+        .unwrap()
+        .expect("a run is claimed");
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn the_contract_suite_passes_with_the_fake_orchestrator() {
+    let fake = FakeOrchestrator::default();
+    run_suite(fake.clone(), &fake).await;
+}
+
+#[tokio::test]
+async fn a_jobs_statements_run_in_order_with_its_tokens() {
+    let mut report = write("count_back", "SELECT 1");
+    report["run_as"] = json!("report");
+    let p = bundle(json!([
+        write("a", "INSERT a"),
+        write("b", "INSERT b"),
+        report
+    ]));
+    let (runner, fake, trino, digest) = setup(&p, vec![]);
+    for (sql, n) in [("INSERT a", 2), ("INSERT b", 3), ("SELECT 1", 0)] {
+        trino.on(sql, vec![Script::Count(n)]);
+    }
+    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    drive(&runner).await;
+    let r = fake.run(&run).unwrap();
+    assert_eq!(r.state, RunState::Succeeded);
+    assert_eq!(r.counts["statements"], 3);
+    assert_eq!(r.counts["rows_written"], 5);
+    let seen = trino.seen.lock().unwrap();
+    let order: Vec<(&str, &str)> = seen
+        .runs
+        .iter()
+        .map(|r| (r.0.as_str(), r.1.as_str()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            ("INSERT a", "job-token"),
+            ("INSERT b", "job-token"),
+            ("SELECT 1", "report-token")
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_bundle_of_another_digest_runs_nothing() {
+    let p = bundle(json!([write("a", "INSERT a")]));
+    let (runner, fake, trino, _) = setup(&p, vec![]);
+    let run = fake.queue_run("evaluate", parameters(JOB, &"0".repeat(64)));
+    drive(&runner).await;
+    let r = fake.run(&run).unwrap();
+    assert_eq!(r.error_class.as_deref(), Some("bundle_digest_mismatch"));
+    assert!(trino.seen.lock().unwrap().runs.is_empty());
+}
+
+#[tokio::test]
+async fn an_answer_of_another_shape_fails_the_job() {
+    let mut st = write("a", "INSERT a");
+    st["expects"] = json!({"kind": "count", "update_types": ["DELETE"]});
+    let (runner, fake, trino, digest) = setup(&bundle(json!([st, write("b", "INSERT b")])), vec![]);
+    trino.on("INSERT a", vec![Script::Count(1)]);
+    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    drive(&runner).await;
+    assert_eq!(
+        fake.run(&run).unwrap().error_class.as_deref(),
+        Some("unexpected_answer")
+    );
+    assert_eq!(trino.seen.lock().unwrap().runs.len(), 1, "nothing after it");
+}
+
+#[tokio::test]
+async fn a_transient_error_is_an_interruption_and_a_retry_resumes_after_killing() {
+    let p = bundle(json!([write("a", "INSERT a"), write("b", "INSERT b")]));
+    let (runner, fake, trino, digest) = setup(&p, vec![]);
+    trino.on("INSERT a", vec![Script::Count(1)]);
+    trino.on(
+        "INSERT b",
+        vec![Script::Fail("SERVER_STARTING_UP"), Script::Count(4)],
+    );
+    let first = fake.queue_run("evaluate", parameters(JOB, &digest));
+    drive(&runner).await;
+    let r = fake.run(&first).unwrap();
+    assert_eq!(r.error_class.as_deref(), Some("trino_starting"));
+    assert_eq!(r.progress_detail.as_deref(), Some("done:1"));
+    let resume = Resume {
+        previous_run: first,
+        engine_ref: r.engine_ref.clone(),
+        last_detail: r.progress_detail.clone(),
+    };
+    let second = fake.queue_attempt("evaluate", parameters(JOB, &digest), 2, Some(resume));
+    let task = runner.claim_once().await.unwrap().unwrap();
+    task.await.unwrap();
+    assert_eq!(fake.run(&second).unwrap().state, RunState::Succeeded);
+    let seen = trino.seen.lock().unwrap();
+    assert_eq!(
+        seen.kills,
+        [r.engine_ref.unwrap()],
+        "the old query ended first"
+    );
+    let sqls: Vec<&str> = seen.runs.iter().map(|r| r.0.as_str()).collect();
+    assert_eq!(
+        sqls,
+        ["INSERT a", "INSERT b", "INSERT b"],
+        "statement a not again"
+    );
+}
+
+#[tokio::test]
+async fn a_cancel_kills_the_running_query() {
+    let (runner, fake, trino, digest) = setup(&bundle(json!([write("a", "INSERT a")])), vec![]);
+    trino.on("INSERT a", vec![Script::Wait]);
+    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    runner.register().await.unwrap();
+    let task = runner.claim_once().await.unwrap().unwrap();
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    fake.cancel(&run).await;
+    let ended = tokio::time::timeout(Duration::from_secs(5), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        ended,
+        Ended::Reported(orchestration_model::FinalState::Cancelled)
+    );
+    assert_eq!(trino.seen.lock().unwrap().kills, ["q_1"]);
+}
+
+#[tokio::test]
+async fn a_source_statement_tries_the_previous_secret_once() {
+    let mut st = write("extract", "INSERT x");
+    st["reads_source"] = json!(true);
+    let creds = vec![Credential {
+        name: "src_crm_password".into(),
+        current: "new".into(),
+        previous: Some("old".into()),
+    }];
+    let (runner, fake, trino, digest) = setup(&bundle(json!([st])), creds);
+    trino.on(
+        "INSERT x",
+        vec![Script::Fail("JDBC_ERROR"), Script::Count(7)],
+    );
+    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    drive(&runner).await;
+    assert_eq!(fake.run(&run).unwrap().state, RunState::Succeeded);
+    let seen = trino.seen.lock().unwrap();
+    let extras: Vec<&Vec<String>> = seen.runs.iter().map(|r| &r.2).collect();
+    assert_eq!(extras, [&vec!["new".to_string()], &vec!["old".to_string()]]);
+    assert!(!format!("{:?}", creds_debug()).contains("new"));
+}
+
+fn creds_debug() -> Credential {
+    Credential {
+        name: "n".into(),
+        current: "new".into(),
+        previous: None,
+    }
+}
+
+#[test]
+fn the_descriptor_is_trino_with_one_line_and_the_jobs_kinds() {
+    let k = key();
+    let core = FakeCore {
+        bundle: sign(&json!({}), &k),
+        credentials: vec![],
+    };
+    let d = TrinoEngine::new(core, FakeTrino::default(), public(&k), "484", 2).descriptor();
+    d.validate().unwrap();
+    assert_eq!(
+        (
+            d.engine.as_str(),
+            d.line.as_str(),
+            d.engine_version.as_str()
+        ),
+        ("trino", "-", "484")
+    );
+    assert_eq!(d.kinds.len(), 12);
+}

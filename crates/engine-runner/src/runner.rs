@@ -163,6 +163,12 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
         loop {
             tokio::select! {
                 done = &mut work => {
+                    // A reference or progress the engine set just before
+                    // it ended still reaches the orchestrator: a repeated
+                    // attempt resumes from it.
+                    if ctx.with_state(|s| s.ref_changed) {
+                        let _ = self.renew(&run, &ctx).await;
+                    }
                     let outcome = done.unwrap_or_else(|_| Outcome::failed("runner_panic"));
                     let outcome = adjust(outcome, stopped);
                     return self.finish(&run, &ctx, outcome).await;

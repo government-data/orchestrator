@@ -3352,11 +3352,16 @@ dependencies = [
 name = "trino-runner"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
+ "engine-port",
+ "engine-runner",
+ "orchestration-model",
  "ring",
  "serde",
  "serde_json",
  "sha2",
+ "tokio",
 ]
 
 [[package]]
