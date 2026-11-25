@@ -4,6 +4,7 @@
 #![allow(dead_code, unreachable_pub)]
 
 use chrono::{DateTime, Utc};
+use engine_port::{Descriptor, RunKind, PORT};
 use orchestration_model::{EngineLine, EngineName, Line, OnInterrupt};
 use orchestrator_postgres::NewFlow;
 use serde_json::json;
@@ -68,5 +69,20 @@ pub fn new_flow(folder_id: &str, name: &str) -> NewFlow {
         timeout_secs: 600,
         allow_overlap: false,
         on_interrupt: Some(OnInterrupt::Repeat),
+    }
+}
+
+/// A runner's descriptor of `engine` and `line`, one kind, two at once.
+pub fn descriptor(engine: &str, line: &str) -> Descriptor {
+    Descriptor {
+        engine: EngineName::new(engine).unwrap(),
+        line: Line::new(line).unwrap(),
+        engine_version: "1.2.3".into(),
+        port: PORT,
+        kinds: vec![RunKind {
+            name: "load".into(),
+            parameters: json!({"type": "object"}),
+        }],
+        concurrency: 2,
     }
 }

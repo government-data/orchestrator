@@ -3,11 +3,13 @@
 //! module's own, created by the agent at `module add` (quality-sdk decision
 //! 0009); its migrations only add.
 
+mod engines;
 mod flows;
 mod schedules;
 mod store;
 mod variables;
 
+pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
 pub use schedules::{NewSchedule, Schedule};
 pub(crate) use store::corrupt;

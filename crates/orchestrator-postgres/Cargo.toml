@@ -15,6 +15,7 @@ workspace = true
 # embedded, and the store. Runtime queries only: the build needs no
 # database.
 [dependencies]
+engine-port.workspace = true
 orchestration-model.workspace = true
 schedule.workspace = true
 chrono.workspace = true
