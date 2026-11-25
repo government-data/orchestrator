@@ -15,7 +15,8 @@ workspace = true
 # step 20): it verifies the core's signed statement bundle, runs each
 # statement on Trino with the job's token and checks its answer.
 [dependencies]
-p256.workspace = true
+base64.workspace = true
+ring.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

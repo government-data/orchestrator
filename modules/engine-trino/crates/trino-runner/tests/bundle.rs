@@ -1,9 +1,9 @@
 //! A bundle verifies only with its digest, the core's key and its job;
 //! answers fit their statements; errors are classed by name.
 
-use p256::ecdsa::signature::Signer;
-use p256::ecdsa::{Signature, SigningKey};
-use p256::pkcs8::{EncodePublicKey, LineEnding};
+use base64::Engine as _;
+use ring::rand::SystemRandom;
+use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde_json::json;
 use trino_runner::{
     class, digest_hex, fits, Answer, BundleKey, BundleRefused, Expects, SignedBundle,
@@ -11,21 +11,30 @@ use trino_runner::{
 
 const JOB: &str = "00000000-0000-4000-8000-00000000000a";
 
-fn key() -> SigningKey {
-    SigningKey::from_slice(&[7u8; 32]).unwrap()
+fn key() -> EcdsaKeyPair {
+    let rng = SystemRandom::new();
+    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
+    EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng).unwrap()
 }
 
-fn public(k: &SigningKey) -> BundleKey {
-    let pem = k.verifying_key().to_public_key_pem(LineEnding::LF).unwrap();
+/// The key's PEM, as the core publishes it.
+fn public(k: &EcdsaKeyPair) -> BundleKey {
+    let mut der = vec![
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    der.extend_from_slice(k.public_key().as_ref());
+    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
+    let pem = format!("-----BEGIN PUBLIC KEY-----\n{b64}\n-----END PUBLIC KEY-----\n");
     BundleKey::from_pem(&pem).unwrap()
 }
 
-fn signed(payload: serde_json::Value, k: &SigningKey) -> SignedBundle {
+fn signed(payload: serde_json::Value, k: &EcdsaKeyPair) -> SignedBundle {
     let payload = serde_json::to_vec(&payload).unwrap();
-    let sig: Signature = k.sign(&payload);
+    let sig = k.sign(&SystemRandom::new(), &payload).unwrap();
     SignedBundle {
         payload,
-        signature: sig.to_bytes().to_vec(),
+        signature: sig.as_ref().to_vec(),
     }
 }
 
@@ -71,7 +80,7 @@ fn a_tampered_or_foreign_bundle_is_refused() {
         tampered.verify(&public(&k), &td, JOB),
         Err(BundleRefused::Signature)
     );
-    let other = SigningKey::from_slice(&[9u8; 32]).unwrap();
+    let other = key();
     assert_eq!(
         b.verify(&public(&other), &d, JOB),
         Err(BundleRefused::Signature)
@@ -88,6 +97,9 @@ fn a_tampered_or_foreign_bundle_is_refused() {
         Err(BundleRefused::Content)
     );
     assert_eq!(BundleRefused::Signature.class(), "bundle_signature_invalid");
+    assert!(
+        BundleKey::from_pem("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----").is_err()
+    );
 }
 
 fn count(update: &str, cols: &[(&str, &str)], rows: serde_json::Value) -> Answer {

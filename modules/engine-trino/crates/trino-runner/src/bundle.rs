@@ -4,9 +4,8 @@
 //! bundle from the core, checks the digest and the signature, and runs
 //! nothing that is not in a bundle that verified.
 
-use p256::ecdsa::signature::Verifier;
-use p256::ecdsa::{Signature, VerifyingKey};
-use p256::pkcs8::DecodePublicKey;
+use base64::Engine as _;
+use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -116,15 +115,36 @@ impl BundleRefused {
     }
 }
 
-/// The core's public key for bundles, from its PEM (SubjectPublicKeyInfo).
+/// The DER prefix of a P-256 public key's SubjectPublicKeyInfo, before its
+/// uncompressed point (`04 || x || y`).
+const P256_SPKI_PREFIX: [u8; 26] = [
+    0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+];
+
+/// The core's public key for bundles: a P-256 point, from its PEM
+/// (SubjectPublicKeyInfo).
 #[derive(Debug, Clone)]
-pub struct BundleKey(VerifyingKey);
+pub struct BundleKey(Vec<u8>);
 
 impl BundleKey {
     pub fn from_pem(pem: &str) -> Result<Self, String> {
-        VerifyingKey::from_public_key_pem(pem)
-            .map(Self)
-            .map_err(|_| "not a P-256 public key in PEM".to_string())
+        let refused = || "not a P-256 public key in PEM".to_string();
+        let body: String = pem
+            .lines()
+            .filter(|l| !l.starts_with("-----"))
+            .collect::<Vec<_>>()
+            .concat();
+        let der = base64::engine::general_purpose::STANDARD
+            .decode(body.trim())
+            .map_err(|_| refused())?;
+        let point = der
+            .strip_prefix(&P256_SPKI_PREFIX[..])
+            .ok_or_else(refused)?;
+        if point.len() != 65 || point[0] != 0x04 {
+            return Err(refused());
+        }
+        Ok(Self(point.to_vec()))
     }
 }
 
@@ -157,10 +177,8 @@ impl SignedBundle {
         if digest_hex(&self.payload) != digest.to_ascii_lowercase() {
             return Err(BundleRefused::Digest);
         }
-        let signature =
-            Signature::from_slice(&self.signature).map_err(|_| BundleRefused::Signature)?;
-        key.0
-            .verify(&self.payload, &signature)
+        UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, &key.0)
+            .verify(&self.payload, &self.signature)
             .map_err(|_| BundleRefused::Signature)?;
         let bundle: Bundle =
             serde_json::from_slice(&self.payload).map_err(|_| BundleRefused::Content)?;

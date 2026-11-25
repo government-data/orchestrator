@@ -28,8 +28,10 @@ schedule = { path = "crates/schedule" }
 logging = { git = "https://github.com/government-data/core", rev = "a986ba377468596dfec44d55f01e561506986216" }
 
 # The same versions as the core's.
-# The job runner's bundle signatures (ES256) and digests.
-p256 = { version = "0.13", features = ["ecdsa", "pem"] }
+# The job runner's bundle signatures (ES256), with the ring rustls uses;
+# PEM's base64.
+ring = "0.17"
+base64 = "0.22"
 prometheus-client = "0.24"
 async-trait = "0.1"
 axum = "0.8"
