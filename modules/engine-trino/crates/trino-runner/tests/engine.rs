@@ -9,34 +9,32 @@ mod common;
 
 use std::time::Duration;
 
-use common::{bundle, key, public, sign, write, FakeCore, FakeTrino, Script, JOB};
+use common::{bundle, write, FakeCore, FakeTrino, Script};
 use engine_port::Resume;
 use engine_runner::contract::{run_suite, FakeOrchestrator, Seed};
 use engine_runner::{Ended, Engine, NoGuard, Runner};
 use orchestration_model::RunState;
 use serde_json::{json, Value};
-use trino_runner::{digest_hex, parameters, Credential, TrinoEngine};
+use trino_runner::{parameters, Credential, TrinoEngine};
 
 type Tested = Runner<TrinoEngine<FakeCore, FakeTrino>, FakeOrchestrator, NoGuard>;
 
-fn setup(
-    payload: &Value,
-    credentials: Vec<Credential>,
-) -> (Tested, FakeOrchestrator, FakeTrino, String) {
-    let k = key();
-    let signed = sign(payload, &k);
-    let digest = digest_hex(&signed.payload);
+fn setup(payload: &Value, credentials: Vec<Credential>) -> (Tested, FakeOrchestrator, FakeTrino) {
+    setup_with(FakeCore::new(payload.clone(), credentials))
+}
+
+fn setup_with(core: FakeCore) -> (Tested, FakeOrchestrator, FakeTrino) {
     let trino = FakeTrino::default();
-    let core = FakeCore {
-        bundle: signed,
-        credentials,
-    };
-    let engine = TrinoEngine::new(core, trino.clone(), public(&k), "484", 2)
-        .polling_every(Duration::from_millis(10));
+    let engine =
+        TrinoEngine::new(core, trino.clone(), "484", 2).polling_every(Duration::from_millis(10));
     let fake = FakeOrchestrator::default();
     let runner =
         Runner::new(engine, fake.clone(), NoGuard, "r").renewing_every(Duration::from_millis(50));
-    (runner, fake, trino, digest)
+    (runner, fake, trino)
+}
+
+fn params() -> Value {
+    parameters("loans", "2026-10-31")
 }
 
 async fn drive(runner: &Tested) -> Ended {
@@ -67,11 +65,11 @@ async fn a_jobs_statements_run_in_order_with_its_tokens() {
         write("b", "INSERT b"),
         report
     ]));
-    let (runner, fake, trino, digest) = setup(&p, vec![]);
+    let (runner, fake, trino) = setup(&p, vec![]);
     for (sql, n) in [("INSERT a", 2), ("INSERT b", 3), ("SELECT 1", 0)] {
         trino.on(sql, vec![Script::Count(n)]);
     }
-    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    let run = fake.queue_run("evaluate", params());
     drive(&runner).await;
     let r = fake.run(&run).unwrap();
     assert_eq!(r.state, RunState::Succeeded);
@@ -95,9 +93,10 @@ async fn a_jobs_statements_run_in_order_with_its_tokens() {
 
 #[tokio::test]
 async fn a_bundle_of_another_digest_runs_nothing() {
-    let p = bundle(json!([write("a", "INSERT a")]));
-    let (runner, fake, trino, _) = setup(&p, vec![]);
-    let run = fake.queue_run("evaluate", parameters(JOB, &"0".repeat(64)));
+    let mut core = FakeCore::new(bundle(json!([write("a", "INSERT a")])), vec![]);
+    core.digest = Some("0".repeat(64));
+    let (runner, fake, trino) = setup_with(core);
+    let run = fake.queue_run("evaluate", params());
     drive(&runner).await;
     let r = fake.run(&run).unwrap();
     assert_eq!(r.error_class.as_deref(), Some("bundle_digest_mismatch"));
@@ -105,12 +104,33 @@ async fn a_bundle_of_another_digest_runs_nothing() {
 }
 
 #[tokio::test]
+async fn the_core_is_asked_for_the_runs_job() {
+    let core = FakeCore::new(bundle(json!([write("a", "INSERT a")])), vec![]);
+    let asked = core.asked.clone();
+    let (runner, fake, trino) = setup_with(core);
+    trino.on("INSERT a", vec![Script::Count(1)]);
+    let run = fake.queue_run("evaluate", params());
+    drive(&runner).await;
+    assert_eq!(fake.run(&run).unwrap().state, RunState::Succeeded);
+    let asked = asked.lock().unwrap();
+    assert_eq!(asked[0].0, run, "the core's job is the operator's run");
+    assert_eq!(
+        (
+            asked[0].1.kind.as_str(),
+            asked[0].1.dataset.as_deref(),
+            asked[0].1.cut.as_deref()
+        ),
+        ("evaluate", Some("loans"), Some("2026-10-31"))
+    );
+}
+
+#[tokio::test]
 async fn an_answer_of_another_shape_fails_the_job() {
     let mut st = write("a", "INSERT a");
     st["expects"] = json!({"kind": "count", "update_types": ["DELETE"]});
-    let (runner, fake, trino, digest) = setup(&bundle(json!([st, write("b", "INSERT b")])), vec![]);
+    let (runner, fake, trino) = setup(&bundle(json!([st, write("b", "INSERT b")])), vec![]);
     trino.on("INSERT a", vec![Script::Count(1)]);
-    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    let run = fake.queue_run("evaluate", params());
     drive(&runner).await;
     assert_eq!(
         fake.run(&run).unwrap().error_class.as_deref(),
@@ -122,13 +142,13 @@ async fn an_answer_of_another_shape_fails_the_job() {
 #[tokio::test]
 async fn a_transient_error_is_an_interruption_and_a_retry_resumes_after_killing() {
     let p = bundle(json!([write("a", "INSERT a"), write("b", "INSERT b")]));
-    let (runner, fake, trino, digest) = setup(&p, vec![]);
+    let (runner, fake, trino) = setup(&p, vec![]);
     trino.on("INSERT a", vec![Script::Count(1)]);
     trino.on(
         "INSERT b",
         vec![Script::Fail("SERVER_STARTING_UP"), Script::Count(4)],
     );
-    let first = fake.queue_run("evaluate", parameters(JOB, &digest));
+    let first = fake.queue_run("evaluate", params());
     drive(&runner).await;
     let r = fake.run(&first).unwrap();
     assert_eq!(r.error_class.as_deref(), Some("trino_starting"));
@@ -138,7 +158,7 @@ async fn a_transient_error_is_an_interruption_and_a_retry_resumes_after_killing(
         engine_ref: r.engine_ref.clone(),
         last_detail: r.progress_detail.clone(),
     };
-    let second = fake.queue_attempt("evaluate", parameters(JOB, &digest), 2, Some(resume));
+    let second = fake.queue_attempt("evaluate", params(), 2, Some(resume));
     let task = runner.claim_once().await.unwrap().unwrap();
     task.await.unwrap();
     assert_eq!(fake.run(&second).unwrap().state, RunState::Succeeded);
@@ -158,9 +178,9 @@ async fn a_transient_error_is_an_interruption_and_a_retry_resumes_after_killing(
 
 #[tokio::test]
 async fn a_cancel_kills_the_running_query() {
-    let (runner, fake, trino, digest) = setup(&bundle(json!([write("a", "INSERT a")])), vec![]);
+    let (runner, fake, trino) = setup(&bundle(json!([write("a", "INSERT a")])), vec![]);
     trino.on("INSERT a", vec![Script::Wait]);
-    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    let run = fake.queue_run("evaluate", params());
     runner.register().await.unwrap();
     let task = runner.claim_once().await.unwrap().unwrap();
     tokio::time::sleep(Duration::from_millis(150)).await;
@@ -185,12 +205,12 @@ async fn a_source_statement_tries_the_previous_secret_once() {
         current: "new".into(),
         previous: Some("old".into()),
     }];
-    let (runner, fake, trino, digest) = setup(&bundle(json!([st])), creds);
+    let (runner, fake, trino) = setup(&bundle(json!([st])), creds);
     trino.on(
         "INSERT x",
         vec![Script::Fail("JDBC_ERROR"), Script::Count(7)],
     );
-    let run = fake.queue_run("evaluate", parameters(JOB, &digest));
+    let run = fake.queue_run("evaluate", params());
     drive(&runner).await;
     assert_eq!(fake.run(&run).unwrap().state, RunState::Succeeded);
     let seen = trino.seen.lock().unwrap();
@@ -209,12 +229,8 @@ fn creds_debug() -> Credential {
 
 #[test]
 fn the_descriptor_is_trino_with_one_line_and_the_jobs_kinds() {
-    let k = key();
-    let core = FakeCore {
-        bundle: sign(&json!({}), &k),
-        credentials: vec![],
-    };
-    let d = TrinoEngine::new(core, FakeTrino::default(), public(&k), "484", 2).descriptor();
+    let core = FakeCore::new(json!({}), vec![]);
+    let d = TrinoEngine::new(core, FakeTrino::default(), "484", 2).descriptor();
     d.validate().unwrap();
     assert_eq!(
         (

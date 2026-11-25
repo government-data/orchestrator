@@ -11,7 +11,8 @@ use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 use trino_runner::{
-    Answer, BundleKey, Core, CoreError, Credential, RunAs, SignedBundle, Trino, TrinoFailure,
+    digest_hex, Answer, Core, CoreError, Credential, JobRequest, Keys, RunAs, SignedBundle, Trino,
+    TrinoFailure, BUNDLE_TYP,
 };
 
 pub const JOB: &str = "00000000-0000-4000-8000-00000000000a";
@@ -22,50 +23,103 @@ pub fn key() -> EcdsaKeyPair {
     EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng).unwrap()
 }
 
-/// The key's PEM, as the core publishes it.
-pub fn public(k: &EcdsaKeyPair) -> BundleKey {
-    let mut der = vec![
-        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
-        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
-    ];
-    der.extend_from_slice(k.public_key().as_ref());
-    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-    BundleKey::from_pem(&format!(
-        "-----BEGIN PUBLIC KEY-----\n{b64}\n-----END PUBLIC KEY-----\n"
-    ))
-    .unwrap()
+fn b64(bytes: &[u8]) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// The provider's JWKS with `k` as `kid` (and an Ed25519 key, left out).
+pub fn jwks(k: &EcdsaKeyPair, kid: &str) -> Value {
+    let point = k.public_key().as_ref();
+    json!({"keys": [
+        {"kty": "OKP", "crv": "Ed25519", "kid": "ed", "x": b64(&[1; 32])},
+        {"kty": "EC", "crv": "P-256", "kid": kid, "alg": "ES256",
+         "x": b64(&point[1..33]), "y": b64(&point[33..65])}
+    ]})
+}
+
+pub fn keys(k: &EcdsaKeyPair, kid: &str) -> Keys {
+    Keys::from_jwks(&jwks(k, kid))
+}
+
+/// A compact JWS of `payload` with this header, signed over
+/// `header.payload` as the core's provider signs.
+pub fn jws_with(header: &Value, payload: &Value, k: &EcdsaKeyPair) -> SignedBundle {
+    let body = serde_json::to_vec(payload).unwrap();
+    let signed = format!(
+        "{}.{}",
+        b64(&serde_json::to_vec(header).unwrap()),
+        b64(&body)
+    );
+    let sig = k.sign(&SystemRandom::new(), signed.as_bytes()).unwrap();
+    SignedBundle {
+        jws: format!("{signed}.{}", b64(sig.as_ref())),
+        digest: digest_hex(&body),
+    }
 }
 
 pub fn sign(payload: &Value, k: &EcdsaKeyPair) -> SignedBundle {
-    let payload = serde_json::to_vec(payload).unwrap();
-    let sig = k.sign(&SystemRandom::new(), &payload).unwrap();
-    SignedBundle {
+    jws_with(
+        &json!({"alg": "ES256", "typ": BUNDLE_TYP, "kid": "k1"}),
         payload,
-        signature: sig.as_ref().to_vec(),
-    }
+        k,
+    )
 }
 
 /// A bundle of kind `evaluate` with these statements.
 pub fn bundle(statements: Value) -> Value {
-    json!({"job_id": JOB, "kind": "evaluate", "dataset": "loans", "cut": "c1", "attempt": 1,
-        "run_id": "r1", "run_seq": 1, "catalog_commit": "abc", "compiler_version": "1.0.0",
-        "statements": statements})
+    json!({"job_id": JOB, "kind": "evaluate", "dataset": "loans", "cut": "2026-10-31",
+        "attempt": 1, "run_id": "r1", "run_seq": 1, "catalog_commit": "abc",
+        "compiler_version": "1.0.0", "statements": statements})
 }
 
 pub fn write(id: &str, sql: &str) -> Value {
     json!({"id": id, "sql": sql, "expects": {"kind": "count", "update_types": ["INSERT"]}})
 }
 
-#[derive(Debug, Clone)]
+/// A core that compiles `template` for the run it is asked for, signs it
+/// with its key `k1`, and serves its JWKS.
+#[derive(Clone)]
 pub struct FakeCore {
-    pub bundle: SignedBundle,
+    pub key: Arc<EcdsaKeyPair>,
+    pub template: Value,
     pub credentials: Vec<Credential>,
+    /// The digest it answers instead of the bundle's own (a broken pin).
+    pub digest: Option<String>,
+    pub asked: Arc<Mutex<Vec<(String, JobRequest)>>>,
+}
+
+impl std::fmt::Debug for FakeCore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FakeCore")
+    }
+}
+
+impl FakeCore {
+    pub fn new(template: Value, credentials: Vec<Credential>) -> Self {
+        Self {
+            key: Arc::new(key()),
+            template,
+            credentials,
+            digest: None,
+            asked: Arc::default(),
+        }
+    }
 }
 
 #[async_trait]
 impl Core for FakeCore {
-    async fn bundle(&self, _: &str) -> Result<SignedBundle, CoreError> {
-        Ok(self.bundle.clone())
+    async fn bundle(&self, run: &str, job: &JobRequest) -> Result<SignedBundle, CoreError> {
+        self.asked.lock().unwrap().push((run.into(), job.clone()));
+        let mut payload = self.template.clone();
+        payload["job_id"] = json!(run);
+        let mut signed = sign(&payload, &self.key);
+        if let Some(d) = &self.digest {
+            signed.digest.clone_from(d);
+        }
+        Ok(signed)
+    }
+    async fn keys(&self) -> Result<Keys, CoreError> {
+        Ok(keys(&self.key, "k1"))
     }
     async fn token(&self, _: &str, run_as: RunAs) -> Result<String, CoreError> {
         Ok(match run_as {
