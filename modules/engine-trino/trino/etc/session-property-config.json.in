@@ -1,0 +1,31 @@
+[
+  {
+    "group": "global\\.rules",
+    "sessionProperties": {
+      "spill_enabled": "true",
+      "query_max_execution_time": "2h",
+      "query_max_run_time": "3h",
+      "query_max_write_physical_size": "50GB",
+      "task_concurrency": "4"
+    }
+  },
+  {
+    "group": "global\\.maintenance",
+    "sessionProperties": {
+      "spill_enabled": "true",
+      "query_max_execution_time": "2h"
+    }
+  },
+  {
+    "group": "global\\.bi\\..*",
+    "sessionProperties": {
+      "query_max_memory": "@BI_MEMORY@",
+      "query_max_total_memory": "@BI_MEMORY@",
+      "query_max_memory_per_node": "@BI_MEMORY@",
+      "query_max_execution_time": "2m",
+      "query_max_run_time": "10m",
+      "query_max_scan_physical_bytes": "20GB",
+      "spill_enabled": "false"
+    }
+  }
+]

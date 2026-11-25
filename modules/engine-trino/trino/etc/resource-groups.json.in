@@ -1,0 +1,72 @@
+{
+  "cpuQuotaPeriod": "1h",
+  "physicalDataScanQuotaPeriod": "1h",
+  "rootGroups": [
+    {
+      "name": "global",
+      "softMemoryLimit": "100%",
+      "hardConcurrencyLimit": 100,
+      "maxQueued": 1000,
+      "schedulingPolicy": "weighted_fair",
+      "subGroups": [
+        {
+          "name": "rules",
+          "schedulingWeight": 8,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @RULES_CONCURRENCY@,
+          "maxQueued": 4
+        },
+        {
+          "name": "maintenance",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": 1,
+          "maxQueued": 4
+        },
+        {
+          "name": "bi",
+          "schedulingWeight": 2,
+          "softMemoryLimit": "@BI_SHARE@",
+          "hardConcurrencyLimit": @BI_CONCURRENCY@,
+          "maxQueued": 60,
+          "softCpuLimit": "@BI_CPU_SOFT@",
+          "hardCpuLimit": "@BI_CPU_HARD@",
+          "hardPhysicalDataScanLimit": "@BI_SCAN@",
+          "subGroups": [
+            {
+              "name": "${USER}",
+              "softMemoryLimit": "100%",
+              "hardConcurrencyLimit": 2,
+              "maxQueued": 10
+            }
+          ]
+        },
+        {
+          "name": "admin",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": 2,
+          "maxQueued": 10
+        },
+        {
+          "name": "reject",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "0%",
+          "hardConcurrencyLimit": 0,
+          "maxQueued": 0
+        }
+      ]
+    }
+  ],
+  "selectors": [
+    { "user": "job_maint_[a-z0-9_]+", "group": "global.maintenance" },
+    { "queryType": "ALTER_TABLE_EXECUTE", "group": "global.reject" },
+    { "user": "job_rules_[a-z0-9_]+", "queryType": "SELECT", "group": "global.reject" },
+    { "user": "job_rules_[a-z0-9_]+", "queryType": "EXPLAIN", "group": "global.reject" },
+    { "user": "job_rules_[a-z0-9_]+", "queryType": "DESCRIBE", "group": "global.reject" },
+    { "user": "job_[a-z0-9_]+", "group": "global.rules" },
+    { "user": "person-[0-9a-f-]{36}|bi-superset", "group": "global.bi.${USER}" },
+    { "user": "qd-admin", "group": "global.admin" },
+    { "group": "global.reject" }
+  ]
+}
