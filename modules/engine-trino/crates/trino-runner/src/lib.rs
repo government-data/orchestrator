@@ -10,8 +10,9 @@ mod engine;
 mod ports;
 
 pub use bundle::{
-    digest_hex, Bundle, BundleKey, BundleRefused, Expects, RunAs, SignedBundle, Statement,
+    bundle_kid, digest_hex, Bundle, BundleRefused, Expects, Keys, RunAs, SignedBundle, Statement,
+    BUNDLE_TYP,
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};
-pub use ports::{Core, CoreError, Credential, Trino, TrinoFailure};
+pub use ports::{Core, CoreError, Credential, JobRequest, Trino, TrinoFailure};

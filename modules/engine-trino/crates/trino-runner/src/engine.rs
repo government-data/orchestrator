@@ -15,9 +15,9 @@ use orchestration_model::{EngineName, Interruption, Line};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 
-use crate::bundle::{Bundle, BundleKey, RunAs};
+use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, RunAs, SignedBundle};
 use crate::check::{class, fits};
-use crate::ports::{Core, Trino};
+use crate::ports::{Core, JobRequest, Trino};
 
 /// The job kinds of core decision 0090 (point 2).
 pub const KINDS: [&str; 12] = [
@@ -42,7 +42,8 @@ const KILL_WAIT: Duration = Duration::from_secs(60);
 pub struct TrinoEngine<C, T> {
     core: C,
     trino: T,
-    key: BundleKey,
+    /// The provider's keys, fetched again for a `kid` they lack.
+    keys: Mutex<Keys>,
     version: String,
     concurrency: u32,
     kill_poll: Duration,
@@ -80,11 +81,11 @@ fn transient(c: &str) -> Outcome {
 
 impl<C: Core, T: Trino> TrinoEngine<C, T> {
     /// The engine for Trino `version` (the coordinator's release).
-    pub fn new(core: C, trino: T, key: BundleKey, version: &str, concurrency: u32) -> Self {
+    pub fn new(core: C, trino: T, version: &str, concurrency: u32) -> Self {
         Self {
             core,
             trino,
-            key,
+            keys: Mutex::new(Keys::default()),
             version: version.to_string(),
             concurrency,
             kill_poll: Duration::from_secs(1),
@@ -99,12 +100,63 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         self
     }
 
-    fn params(run: &Claimed) -> Option<(String, String)> {
-        let job = run.parameters.get("job_id")?.as_str()?;
-        let digest = run.parameters.get("bundle_digest")?.as_str()?;
-        let job_ok = job.len() == 36 && job.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
-        let digest_ok = digest.len() == 64 && digest.bytes().all(|b| b.is_ascii_hexdigit());
-        (job_ok && digest_ok).then(|| (job.to_string(), digest.to_string()))
+    /// The job the operator handed out: the run's kind and attempt, and
+    /// its dataset and cut from the parameters.
+    fn request(run: &Claimed) -> Option<JobRequest> {
+        let text = |k: &str| match run.parameters.get(k) {
+            None | Some(Value::Null) => Some(None),
+            Some(Value::String(s)) => Some(Some(s.clone())),
+            Some(_) => None,
+        };
+        let dataset = text("dataset")?;
+        let cut = text("cut")?;
+        let dataset_ok = dataset.as_deref().is_none_or(|d| {
+            !d.is_empty()
+                && d.len() <= 63
+                && d.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        });
+        let cut_ok = cut.as_deref().is_none_or(|c| {
+            c.len() == 10
+                && c.bytes().enumerate().all(|(i, b)| {
+                    if i == 4 || i == 7 {
+                        b == b'-'
+                    } else {
+                        b.is_ascii_digit()
+                    }
+                })
+        });
+        let known = run
+            .parameters
+            .as_object()
+            .is_some_and(|o| o.keys().all(|k| k == "dataset" || k == "cut"));
+        (dataset_ok && cut_ok && known).then(|| JobRequest {
+            kind: run.kind.clone(),
+            dataset,
+            cut,
+            attempt: run.attempt,
+        })
+    }
+
+    /// The bundle verified with the provider's keys, fetched again once
+    /// when its `kid` is not among those held (a rotated key).
+    async fn verified(&self, signed: &SignedBundle, job: &str) -> Result<Bundle, Outcome> {
+        let kid = bundle_kid(&signed.jws).map_err(|r| Outcome::failed(r.class()))?;
+        let held = self
+            .keys
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .has(&kid);
+        if !held {
+            match self.core.keys().await {
+                Ok(k) => *self.keys.lock().unwrap_or_else(|e| e.into_inner()) = k,
+                Err(_) => return Err(transient("core_unavailable")),
+            }
+        }
+        let keys = self.keys.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        signed
+            .verify(&keys, job)
+            .map_err(|r: BundleRefused| Outcome::failed(r.class()))
     }
 
     /// The previous attempt's query, ended before anything runs again, so
@@ -125,17 +177,19 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
     }
 
     async fn job(&self, run: &Claimed, ctx: &RunContext, cancel: &Notify) -> Outcome {
-        let Some((job, digest)) = Self::params(run) else {
+        let Some(request) = Self::request(run) else {
             return Outcome::failed("invalid_parameters");
         };
-        let signed = match self.core.bundle(&job).await {
+        // The core's job is the operator's run (core decision 0090, step 18).
+        let job = run.run.clone();
+        let signed = match self.core.bundle(&job, &request).await {
             Ok(b) => b,
             Err(_) => return transient("core_unavailable"),
         };
-        let bundle = match signed.verify(&self.key, &digest, &job) {
+        let bundle = match self.verified(&signed, &job).await {
             Ok(b) if b.kind == run.kind => b,
             Ok(_) => return Outcome::failed("bundle_invalid"),
-            Err(refused) => return Outcome::failed(refused.class()),
+            Err(o) => return o,
         };
         let Ok(token) = self.core.token(&job, RunAs::Job).await else {
             return transient("core_unavailable");
@@ -273,11 +327,10 @@ impl<C: Core, T: Trino> Engine for TrinoEngine<C, T> {
     fn descriptor(&self) -> Descriptor {
         let parameters = json!({
             "type": "object",
-            "required": ["job_id", "bundle_digest"],
             "additionalProperties": false,
             "properties": {
-                "job_id": {"type": "string", "pattern": "^[0-9a-f-]{36}$"},
-                "bundle_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                "dataset": {"type": "string", "pattern": "^[a-z0-9_]{1,63}$"},
+                "cut": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
             }
         });
         Descriptor {
@@ -297,7 +350,7 @@ impl<C: Core, T: Trino> Engine for TrinoEngine<C, T> {
     }
 
     async fn validate(&self, run: &Claimed) -> Result<(), Refused> {
-        match Self::params(run) {
+        match Self::request(run) {
             Some(_) if KINDS.contains(&run.kind.as_str()) => Ok(()),
             _ => Err(Refused {
                 class: "invalid_parameters".into(),
@@ -341,8 +394,8 @@ impl<C: Core, T: Trino> Engine for TrinoEngine<C, T> {
     }
 }
 
-/// The parameters of a run of job `job` whose bundle has `digest`.
+/// The parameters of a run of a dataset's cut.
 #[must_use]
-pub fn parameters(job: &str, digest: &str) -> Value {
-    json!({"job_id": job, "bundle_digest": digest})
+pub fn parameters(dataset: &str, cut: &str) -> Value {
+    json!({"dataset": dataset, "cut": cut})
 }

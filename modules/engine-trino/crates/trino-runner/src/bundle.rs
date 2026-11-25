@@ -1,26 +1,34 @@
-//! The core's statement bundle (core decision 0090, point 2): a job's
-//! ordered statements, signed by the core with ES256. The operator hands
-//! out only the job's id and the bundle's digest; the runner fetches the
-//! bundle from the core, checks the digest and the signature, and runs
-//! nothing that is not in a bundle that verified.
+//! The core's statement bundle (core decision 0090, point 2; ruled by the
+//! user 2026-11-25): a job's ordered statements as a compact JWS, signed by
+//! the core's OIDC provider with its ES256 key (`typ` `qd-bundle+jwt`, the
+//! signature over `header.payload`). The runner checks the header, finds the
+//! key by `kid` in the provider's JWKS, verifies the signature, then the
+//! payload's digest and its job, and runs nothing that is not in a bundle
+//! that verified.
+
+use std::collections::BTreeMap;
 
 use base64::Engine as _;
 use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 use serde::Deserialize;
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-/// A bundle as fetched: the signed bytes and the signature over them, the
-/// raw `r || s` of ES256 (64 bytes).
+/// The JWS `typ` of a bundle.
+pub const BUNDLE_TYP: &str = "qd-bundle+jwt";
+
+/// A bundle as the core answers it: the compact JWS and the digest it
+/// pinned for the run (the SHA-256 of the payload's bytes).
 #[derive(Clone, PartialEq, Eq)]
 pub struct SignedBundle {
-    pub payload: Vec<u8>,
-    pub signature: Vec<u8>,
+    pub jws: String,
+    pub digest: String,
 }
 
 impl std::fmt::Debug for SignedBundle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SignedBundle")
-            .field("bytes", &self.payload.len())
+            .field("digest", &self.digest)
             .finish_non_exhaustive()
     }
 }
@@ -96,10 +104,14 @@ pub struct Bundle {
 /// Why a bundle is refused: a class, never the bundle's content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BundleRefused {
-    /// Its bytes are not the digest the operator gave.
-    Digest,
-    /// The signature does not verify with the core's key.
+    /// Not a compact JWS of ES256 and `typ` `qd-bundle+jwt`.
+    Header,
+    /// Its `kid` is not in the provider's keys.
+    UnknownKey,
+    /// The signature does not verify with that key.
     Signature,
+    /// Its payload is not the digest pinned for the run.
+    Digest,
     /// It is not a bundle, or not this job's.
     Content,
 }
@@ -108,43 +120,55 @@ impl BundleRefused {
     #[must_use]
     pub fn class(self) -> &'static str {
         match self {
-            Self::Digest => "bundle_digest_mismatch",
+            Self::Header => "bundle_not_a_jws",
+            Self::UnknownKey => "bundle_key_unknown",
             Self::Signature => "bundle_signature_invalid",
+            Self::Digest => "bundle_digest_mismatch",
             Self::Content => "bundle_invalid",
         }
     }
 }
 
-/// The DER prefix of a P-256 public key's SubjectPublicKeyInfo, before its
-/// uncompressed point (`04 || x || y`).
-const P256_SPKI_PREFIX: [u8; 26] = [
-    0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
-    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
-];
+/// The provider's P-256 public keys by `kid`, from its JWKS (other keys,
+/// Ed25519 among them, are left out).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Keys(BTreeMap<String, Vec<u8>>);
 
-/// The core's public key for bundles: a P-256 point, from its PEM
-/// (SubjectPublicKeyInfo).
-#[derive(Debug, Clone)]
-pub struct BundleKey(Vec<u8>);
+fn b64url(s: &str) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(s)
+        .ok()
+}
 
-impl BundleKey {
-    pub fn from_pem(pem: &str) -> Result<Self, String> {
-        let refused = || "not a P-256 public key in PEM".to_string();
-        let body: String = pem
-            .lines()
-            .filter(|l| !l.starts_with("-----"))
-            .collect::<Vec<_>>()
-            .concat();
-        let der = base64::engine::general_purpose::STANDARD
-            .decode(body.trim())
-            .map_err(|_| refused())?;
-        let point = der
-            .strip_prefix(&P256_SPKI_PREFIX[..])
-            .ok_or_else(refused)?;
-        if point.len() != 65 || point[0] != 0x04 {
-            return Err(refused());
+impl Keys {
+    /// The EC P-256 keys of a JWKS document (`{"keys": [...]}`).
+    #[must_use]
+    pub fn from_jwks(jwks: &Value) -> Self {
+        let mut keys = BTreeMap::new();
+        for k in jwks["keys"].as_array().into_iter().flatten() {
+            let text = |f: &str| k[f].as_str();
+            if text("kty") != Some("EC") || text("crv") != Some("P-256") {
+                continue;
+            }
+            let (Some(kid), Some(x), Some(y)) = (text("kid"), text("x"), text("y")) else {
+                continue;
+            };
+            if let (Some(x), Some(y)) = (b64url(x), b64url(y)) {
+                if x.len() == 32 && y.len() == 32 {
+                    let mut point = vec![0x04];
+                    point.extend_from_slice(&x);
+                    point.extend_from_slice(&y);
+                    keys.insert(kid.to_string(), point);
+                }
+            }
         }
-        Ok(Self(point.to_vec()))
+        Self(keys)
+    }
+
+    /// Whether `kid` is one of them.
+    #[must_use]
+    pub fn has(&self, kid: &str) -> bool {
+        self.0.contains_key(kid)
     }
 }
 
@@ -164,24 +188,45 @@ fn is_id(s: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// The `kid` a bundle's header names, if it is one of ES256 and the
+/// bundle's `typ`; the caller fetches the keys again for an unknown one.
+pub fn bundle_kid(jws: &str) -> Result<String, BundleRefused> {
+    let header = jws.split('.').next().ok_or(BundleRefused::Header)?;
+    let header: Value = b64url(header)
+        .and_then(|h| serde_json::from_slice(&h).ok())
+        .ok_or(BundleRefused::Header)?;
+    if header["alg"] != "ES256" || header["typ"] != BUNDLE_TYP {
+        return Err(BundleRefused::Header);
+    }
+    header["kid"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or(BundleRefused::Header)
+}
+
 impl SignedBundle {
-    /// The bundle, once its digest is `digest`, its signature verifies with
-    /// `key`, it is `job`'s, and its statements' ids are well formed and
-    /// unique.
-    pub fn verify(
-        &self,
-        key: &BundleKey,
-        digest: &str,
-        job: &str,
-    ) -> Result<Bundle, BundleRefused> {
-        if digest_hex(&self.payload) != digest.to_ascii_lowercase() {
+    /// The bundle, once its header is ES256 and the bundle's `typ`, its
+    /// signature over `header.payload` verifies with the key its `kid`
+    /// names, its payload is `digest`, it is `job`'s, and its statements'
+    /// ids are well formed and unique.
+    pub fn verify(&self, keys: &Keys, job: &str) -> Result<Bundle, BundleRefused> {
+        let kid = bundle_kid(&self.jws)?;
+        let parts: Vec<&str> = self.jws.split('.').collect();
+        let [header, payload, signature] = parts[..] else {
+            return Err(BundleRefused::Header);
+        };
+        let key = keys.0.get(&kid).ok_or(BundleRefused::UnknownKey)?;
+        let signature = b64url(signature).ok_or(BundleRefused::Signature)?;
+        let signed = format!("{header}.{payload}");
+        UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, key)
+            .verify(signed.as_bytes(), &signature)
+            .map_err(|_| BundleRefused::Signature)?;
+        let payload = b64url(payload).ok_or(BundleRefused::Content)?;
+        if digest_hex(&payload) != self.digest.to_ascii_lowercase() {
             return Err(BundleRefused::Digest);
         }
-        UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, &key.0)
-            .verify(&self.payload, &self.signature)
-            .map_err(|_| BundleRefused::Signature)?;
         let bundle: Bundle =
-            serde_json::from_slice(&self.payload).map_err(|_| BundleRefused::Content)?;
+            serde_json::from_slice(&payload).map_err(|_| BundleRefused::Content)?;
         let mut ids = std::collections::BTreeSet::new();
         let ids_ok = bundle
             .statements

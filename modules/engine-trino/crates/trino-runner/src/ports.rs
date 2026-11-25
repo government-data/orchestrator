@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use crate::bundle::{RunAs, SignedBundle};
+use crate::bundle::{Keys, RunAs, SignedBundle};
 use crate::check::Answer;
 
 /// The core could not answer (a class, never a body).
@@ -29,11 +29,24 @@ impl std::fmt::Debug for Credential {
     }
 }
 
+/// What the runner asks the core for a run's bundle: the job the operator
+/// handed out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobRequest {
+    pub kind: String,
+    pub dataset: Option<String>,
+    pub cut: Option<String>,
+    pub attempt: u32,
+}
+
 /// The core, over mTLS with the runner's machine identity.
 #[async_trait]
 pub trait Core: Send + Sync + 'static {
-    /// The job's signed bundle.
-    async fn bundle(&self, job: &str) -> Result<SignedBundle, CoreError>;
+    /// The run's signed bundle: compiled at the first ask, the same one at
+    /// every later ask for the run.
+    async fn bundle(&self, run: &str, job: &JobRequest) -> Result<SignedBundle, CoreError>;
+    /// The provider's public keys (its JWKS).
+    async fn keys(&self) -> Result<Keys, CoreError>;
     /// A Trino token for the job, as its own user or its report user.
     async fn token(&self, job: &str, run_as: RunAs) -> Result<String, CoreError>;
     /// The secrets of the source the job reads (none for most kinds).

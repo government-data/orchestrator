@@ -1,46 +1,19 @@
 //! A bundle verifies only with its digest, the core's key and its job;
 //! answers fit their statements; errors are classed by name.
 
-use base64::Engine as _;
-use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+mod common;
+
+use common::{jws_with, key, keys, sign};
 use serde_json::json;
 use trino_runner::{
-    class, digest_hex, fits, Answer, BundleKey, BundleRefused, Expects, SignedBundle,
+    bundle_kid, class, fits, Answer, BundleRefused, Expects, Keys, SignedBundle, BUNDLE_TYP,
 };
 
 const JOB: &str = "00000000-0000-4000-8000-00000000000a";
 
-fn key() -> EcdsaKeyPair {
-    let rng = SystemRandom::new();
-    let pkcs8 = EcdsaKeyPair::generate_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, &rng).unwrap();
-    EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, pkcs8.as_ref(), &rng).unwrap()
-}
-
-/// The key's PEM, as the core publishes it.
-fn public(k: &EcdsaKeyPair) -> BundleKey {
-    let mut der = vec![
-        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
-        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
-    ];
-    der.extend_from_slice(k.public_key().as_ref());
-    let b64 = base64::engine::general_purpose::STANDARD.encode(der);
-    let pem = format!("-----BEGIN PUBLIC KEY-----\n{b64}\n-----END PUBLIC KEY-----\n");
-    BundleKey::from_pem(&pem).unwrap()
-}
-
-fn signed(payload: serde_json::Value, k: &EcdsaKeyPair) -> SignedBundle {
-    let payload = serde_json::to_vec(&payload).unwrap();
-    let sig = k.sign(&SystemRandom::new(), &payload).unwrap();
-    SignedBundle {
-        payload,
-        signature: sig.as_ref().to_vec(),
-    }
-}
-
 fn payload() -> serde_json::Value {
     json!({
-        "job_id": JOB, "kind": "evaluate", "dataset": "loans", "cut": "2026-11",
+        "job_id": JOB, "kind": "evaluate", "dataset": "loans", "cut": "2026-11-30",
         "attempt": 1, "run_id": "r1", "run_seq": 4, "catalog_commit": "abc",
         "compiler_version": "1.2.0",
         "statements": [
@@ -54,52 +27,62 @@ fn payload() -> serde_json::Value {
 }
 
 #[test]
-fn a_bundle_verifies_with_its_digest_key_and_job() {
+fn a_jws_verifies_with_its_kid_its_digest_and_its_job() {
     let k = key();
-    let b = signed(payload(), &k);
-    let d = digest_hex(&b.payload);
-    let bundle = b.verify(&public(&k), &d, JOB).unwrap();
+    let b = sign(&payload(), &k);
+    assert_eq!(bundle_kid(&b.jws), Ok("k1".to_string()));
+    let bundle = b.verify(&keys(&k, "k1"), JOB).unwrap();
     assert_eq!(bundle.statements.len(), 2);
     assert_eq!(bundle.statements[1].run_as, trino_runner::RunAs::Report);
     assert!(!format!("{:?}", bundle.statements[0]).contains("INSERT INTO"));
+    assert!(!format!("{b:?}").contains(&b.jws));
 }
 
 #[test]
-fn a_tampered_or_foreign_bundle_is_refused() {
+fn a_tampered_foreign_or_odd_jws_is_refused() {
     let k = key();
-    let b = signed(payload(), &k);
-    let d = digest_hex(&b.payload);
-    let mut tampered = b.clone();
-    tampered.payload[10] ^= 1;
-    let td = digest_hex(&tampered.payload);
+    let b = sign(&payload(), &k);
+    let ks = keys(&k, "k1");
+    let parts: Vec<&str> = b.jws.split('.').collect();
+    // Another payload under the same signature.
+    let other = sign(&json!({"job_id": JOB}), &k);
+    let swapped = SignedBundle {
+        jws: format!(
+            "{}.{}.{}",
+            parts[0],
+            other.jws.split('.').nth(1).unwrap(),
+            parts[2]
+        ),
+        digest: other.digest.clone(),
+    };
+    assert_eq!(swapped.verify(&ks, JOB), Err(BundleRefused::Signature));
+    let mut wrong_digest = b.clone();
+    wrong_digest.digest = "0".repeat(64);
+    assert_eq!(wrong_digest.verify(&ks, JOB), Err(BundleRefused::Digest));
     assert_eq!(
-        tampered.verify(&public(&k), &d, JOB),
-        Err(BundleRefused::Digest)
-    );
-    assert_eq!(
-        tampered.verify(&public(&k), &td, JOB),
+        b.verify(&keys(&key(), "k1"), JOB),
         Err(BundleRefused::Signature)
     );
-    let other = key();
     assert_eq!(
-        b.verify(&public(&other), &d, JOB),
-        Err(BundleRefused::Signature)
+        b.verify(&Keys::default(), JOB),
+        Err(BundleRefused::UnknownKey)
     );
-    assert_eq!(
-        b.verify(&public(&k), &d, "another-job"),
-        Err(BundleRefused::Content)
-    );
+    assert_eq!(b.verify(&ks, "another-job"), Err(BundleRefused::Content));
+    for header in [
+        json!({"alg": "HS256", "typ": BUNDLE_TYP, "kid": "k1"}),
+        json!({"alg": "ES256", "typ": "JWT", "kid": "k1"}),
+        json!({"alg": "ES256", "typ": BUNDLE_TYP}),
+    ] {
+        let odd = jws_with(&header, &payload(), &k);
+        assert_eq!(odd.verify(&ks, JOB), Err(BundleRefused::Header), "{header}");
+    }
     let mut twice = payload();
     twice["statements"][1]["id"] = json!("insert_icd");
-    let t = signed(twice, &k);
     assert_eq!(
-        t.verify(&public(&k), &digest_hex(&t.payload), JOB),
+        sign(&twice, &k).verify(&ks, JOB),
         Err(BundleRefused::Content)
     );
     assert_eq!(BundleRefused::Signature.class(), "bundle_signature_invalid");
-    assert!(
-        BundleKey::from_pem("-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----").is_err()
-    );
 }
 
 fn count(update: &str, cols: &[(&str, &str)], rows: serde_json::Value) -> Answer {
