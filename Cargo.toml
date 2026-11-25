@@ -14,11 +14,16 @@ repository = "https://github.com/quality-data/orchestrator"
 [workspace.dependencies]
 # The orchestrator's own crates.
 orchestration-model = { path = "crates/orchestration-model" }
+schedule = { path = "crates/schedule" }
 
 # The same versions as the core's.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+# Schedules: dates with a time zone.
+chrono-tz = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# The stable random delay of a trigger.
+sha2 = "0.10"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

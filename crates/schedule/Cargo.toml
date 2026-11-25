@@ -1,0 +1,24 @@
+[package]
+name = "schedule"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# When a schedule fires next (decision 0011): triggers with
+# recurrence, repetition, a stable random delay and expiry, in the
+# schedule's time zone, returned in UTC. Pure computation, no I/O.
+[dependencies]
+chrono.workspace = true
+chrono-tz.workspace = true
+serde.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
