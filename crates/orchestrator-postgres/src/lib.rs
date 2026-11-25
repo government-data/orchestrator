@@ -6,11 +6,13 @@
 mod flows;
 mod schedules;
 mod store;
+mod variables;
 
 pub use flows::NewFlow;
 pub use schedules::{NewSchedule, Schedule};
 pub(crate) use store::corrupt;
 pub use store::{PgStore, StoreError};
+pub use variables::{SecretInfo, Variable, VariableValue};
 
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
