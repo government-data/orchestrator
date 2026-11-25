@@ -3,6 +3,7 @@
 //! repetitions their flows ask for; cancel what waited too long.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 use orchestration_model::{
@@ -11,7 +12,7 @@ use orchestration_model::{
 use orchestrator_postgres::{NewRun, PgStore, Schedule, StoreError};
 use schedule::Calendar;
 
-use crate::Clock;
+use crate::{Clock, Metrics};
 
 /// Runners on engine port 1 stop a run they can no longer renew before its
 /// lease ends, so a lost run's engine is known to have stopped.
@@ -35,11 +36,23 @@ pub struct Tick {
 pub struct Scheduler<C> {
     store: PgStore,
     clock: C,
+    metrics: Option<Arc<Metrics>>,
 }
 
 impl<C: Clock> Scheduler<C> {
     pub fn new(store: PgStore, clock: C) -> Self {
-        Self { store, clock }
+        Self {
+            store,
+            clock,
+            metrics: None,
+        }
+    }
+
+    /// Counts what each tick does in `metrics` and refreshes its gauges.
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<Metrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
     }
 
     /// One pass; each part can run twice and on two servers at once.
@@ -47,7 +60,8 @@ impl<C: Clock> Scheduler<C> {
         let now = self.clock.now();
         let mut tick = Tick::default();
         self.fire(now, &mut tick).await?;
-        tick.lost = count(self.store.reap(now).await?.len());
+        let lost = self.store.reap(now).await?;
+        tick.lost = count(lost.len());
         for (run, cut) in self.store.interrupted(now, RUNNERS_FENCE).await? {
             if let Some(r) = retry(&cut, now) {
                 if self.store.queue_retry(&run, &r, now).await?.is_some() {
@@ -58,6 +72,13 @@ impl<C: Clock> Scheduler<C> {
         if let Some(wait) = self.store.settings().await?.queued_wait_minutes {
             let before = now - Duration::minutes(i64::from(wait));
             tick.cancelled = count(self.store.cancel_stale(before, now).await?.len());
+        }
+        if let Some(m) = &self.metrics {
+            m.count_ended(&self.store, &lost).await?;
+            m.missed_fires_total.inc_by(u64::from(tick.skipped));
+            #[allow(clippy::cast_precision_loss)]
+            m.schedule_lag_seconds.set(tick.lag_secs.max(0) as f64);
+            m.refresh(&self.store, now).await?;
         }
         Ok(tick)
     }

@@ -93,6 +93,16 @@ pub fn descriptor() -> Descriptor {
 }
 
 impl Harness {
+    /// Serves the port again, counting in `metrics`.
+    pub fn with_metrics(&mut self, metrics: Arc<orchestrator_server::Metrics>) {
+        let state = PortState {
+            port: EnginePort::new(self.store.clone(), self.clock.clone())
+                .with_metrics(Arc::clone(&metrics)),
+            auth: Arc::new(HeaderMachine),
+        };
+        self.app = orchestrator_server::counted(router(Arc::new(state)), metrics);
+    }
+
     /// A call of the fake engine from `machine` (`None`: no identity).
     pub async fn call(
         &self,

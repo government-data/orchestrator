@@ -199,3 +199,25 @@ async fn release<C: Clock>(
     s.port.release(&e, &r).await?;
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// Counts every request of `router`'s routes by its template and status.
+pub fn counted(router: Router, metrics: Arc<crate::Metrics>) -> Router {
+    router.route_layer(axum::middleware::from_fn(
+        move |req: axum::extract::Request, next: axum::middleware::Next| {
+            let metrics = Arc::clone(&metrics);
+            async move {
+                let route = req
+                    .extensions()
+                    .get::<axum::extract::MatchedPath>()
+                    .map_or_else(|| "unmatched".to_string(), |p| p.as_str().to_string());
+                let res = next.run(req).await;
+                let labels = crate::metrics::HttpLabels {
+                    route,
+                    status: res.status().as_u16(),
+                };
+                metrics.http_requests_total.get_or_create(&labels).inc();
+                res
+            }
+        },
+    ))
+}
