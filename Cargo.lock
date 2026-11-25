@@ -636,13 +636,21 @@ name = "engine-runner"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "axum",
+ "chrono",
  "engine-port",
  "orchestration-model",
+ "orchestrator-postgres",
+ "orchestrator-server",
  "reqwest",
  "serde",
  "serde_json",
+ "sqlx",
+ "testcontainers",
+ "testcontainers-modules",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
