@@ -16,9 +16,12 @@ repository = "https://github.com/government-data/orchestrator"
 engine-port = { path = "crates/engine-port" }
 orchestration-model = { path = "crates/orchestration-model" }
 orchestrator-postgres = { path = "crates/orchestrator-postgres" }
+orchestrator-server = { path = "crates/orchestrator-server" }
 schedule = { path = "crates/schedule" }
 
 # The same versions as the core's.
+async-trait = "0.1"
+axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
 # Schedules: dates with a time zone, and the 5-field cron (crontab's) that
 # `croner` takes as is.
@@ -44,6 +47,8 @@ sqlx = { version = "0.8", default-features = false, features = [
     "uuid",
 ] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
 # Ephemeral PostgreSQL containers for the integration tests.
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres"] }

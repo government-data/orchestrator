@@ -1,0 +1,33 @@
+[package]
+name = "orchestrator-server"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# The orchestrator's server (decision 0011): the scheduler and the engine
+# port, on the PostgreSQL adapter. Names no engine.
+[dependencies]
+engine-port.workspace = true
+orchestration-model.workspace = true
+orchestrator-postgres.workspace = true
+schedule.workspace = true
+async-trait.workspace = true
+axum.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+testcontainers.workspace = true
+testcontainers-modules.workspace = true
+tokio.workspace = true
+tower.workspace = true
