@@ -1,0 +1,43 @@
+# The orchestrator's Rust workspace. Each crate lives under `crates/` and
+# opts into the shared package fields, lints and dependency versions below.
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.90"
+license = "MIT"
+authors = ["quality-data"]
+repository = "https://github.com/quality-data/orchestrator"
+
+[workspace.dependencies]
+# The orchestrator's own crates.
+orchestration-model = { path = "crates/orchestration-model" }
+
+# The same versions as the core's.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+todo = "warn"
+dbg_macro = "warn"
+# Functions over `too-many-lines-threshold` (clippy.toml) fail CI.
+too_many_lines = "warn"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"

@@ -1,0 +1,8 @@
+/target/
+/dist/
+# Internal documentation (decisions, implementation, roadmap): never committed.
+/docs/
+.env
+.env.*
+*.pem
+*.key

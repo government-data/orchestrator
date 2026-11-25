@@ -1,0 +1,21 @@
+[package]
+name = "orchestration-model"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+# What the orchestrator manages, engine by engine without naming one: flows,
+# runs and their state machine, attempts, what an interrupted run does,
+# missed fires, pauses and maintenance windows (decision 0011). Pure: no I/O,
+# no clock; time comes in as an argument.
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
