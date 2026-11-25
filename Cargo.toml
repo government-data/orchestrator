@@ -18,8 +18,10 @@ schedule = { path = "crates/schedule" }
 
 # The same versions as the core's.
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
-# Schedules: dates with a time zone.
+# Schedules: dates with a time zone, and the 5-field cron (crontab's) that
+# `croner` takes as is.
 chrono-tz = "0.10"
+croner = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # The stable random delay of a trigger.
