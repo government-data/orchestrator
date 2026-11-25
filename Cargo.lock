@@ -1612,6 +1612,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "orchestration-model",
+ "schedule",
  "serde_json",
  "sqlx",
  "testcontainers",
