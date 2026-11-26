@@ -22,11 +22,16 @@
 # Required environment (the module's .env): QD_MACHINE_DIR (the master's
 # machine certificate: ca.crt, machine.pem), QD_SECRETS_DIR, QD_OIDC_ISSUER,
 # TRINO_NODE_NAME (the master's machine name, as in its certificate),
-# CORE_URL (the core's internal entry point with /api), ORCHESTRATOR_URL,
-# QD_LAKE_GATE (<lake machine>:<port>), QD_LAKE_NAME, TRINO_LAKE_WAREHOUSE,
+# CORE_URL (the core's internal entry point on 443: https://<master's
+# machine name>/api), ORCHESTRATOR_URL (its route on that entry point),
+# QD_LAKE_GATE (<lake machine>:443), QD_LAKE_NAME (<lake machine>),
+# TRINO_LAKE_WAREHOUSE,
 # QD_OIDC_MACHINE_CLIENT_ID (the module's machine client; its secret is
 # the agent's oidc-machine-secret file).
 # Optional: TRINO_TIER (s), TRINO_PORT (8490), TRINO_WORKERS, RUNNER_CONCURRENCY (1).
+#
+# The master's machine name resolves to the host in `rules` and `runner`
+# (host-gateway), where the core's Traefik passes it on 443 by SNI.
 name: engine-trino
 
 networks:
@@ -119,6 +124,7 @@ services:
       QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
       QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
       RULES_LISTEN: 0.0.0.0:8070
+    extra_hosts: ["${TRINO_NODE_NAME:?}:host-gateway"]
     volumes:
       - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
 
@@ -138,7 +144,7 @@ services:
       CORE_URL: ${CORE_URL:?}
       QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
       QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
-      TRINO_URL: https://${TRINO_NODE_NAME:?}:8490
+      TRINO_URL: https://${TRINO_NODE_NAME:?}:${TRINO_PORT:-8490}
       TRINO_VERSION: "484"
       RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-1}
     extra_hosts: ["${TRINO_NODE_NAME:?}:host-gateway"]
