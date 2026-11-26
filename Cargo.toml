@@ -34,6 +34,8 @@ logging = { git = "https://github.com/government-data/core", rev = "a986ba377468
 trino-client = { git = "https://github.com/government-data/query-trino", rev = "61a8164e80706f28c6ae8f389373cbfb693a06aa" }
 
 # The same versions as the core's.
+# A runner's free disk (`statvfs`), as the core's worker reads it.
+rustix = { version = "1", features = ["fs"] }
 # The job runner's bundle signatures (ES256), with the ring rustls uses;
 # PEM's base64.
 ring = "0.17"

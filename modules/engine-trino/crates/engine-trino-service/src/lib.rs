@@ -27,6 +27,7 @@ use trino_runner::{
     Answer, Core, CoreError, Credential, JobRequest, Keys, RunAs, SignedBundle, Trino, TrinoFailure,
 };
 
+pub mod guard;
 pub mod rules;
 
 /// An HTTP client that presents the machine's certificate (`machine.pem`:
