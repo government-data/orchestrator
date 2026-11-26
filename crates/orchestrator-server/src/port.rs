@@ -35,6 +35,8 @@ pub enum PortError {
     Lease,
     /// No engine or line of that name is registered.
     UnknownEngine,
+    /// The deploy is not one this machine claimed, or it ended otherwise.
+    NotTheirs,
     /// The store failed.
     Store(StoreError),
 }
@@ -45,6 +47,9 @@ impl fmt::Display for PortError {
             Self::Refused(r) => r.fmt(f),
             Self::Lease => f.write_str("the lease is not this run's any more"),
             Self::UnknownEngine => f.write_str("no such engine and line is registered"),
+            Self::NotTheirs => {
+                f.write_str("the deploy is not this machine's to finish, or it ended otherwise")
+            }
             Self::Store(e) => e.fmt(f),
         }
     }
@@ -77,7 +82,7 @@ pub fn runner_of(machine: &Machine, engine: &EngineLine) -> String {
 #[derive(Debug, Clone)]
 pub struct EnginePort<C> {
     pub(crate) store: PgStore,
-    clock: C,
+    pub(crate) clock: C,
     metrics: Option<Arc<Metrics>>,
     sealer: Option<Arc<Sealer>>,
 }
