@@ -103,6 +103,12 @@ pub enum RenewAction {
 pub struct Renewed {
     pub action: RenewAction,
     pub lease_until: DateTime<Utc>,
+    /// Someone asked for a scan: report what is on the cluster now, without
+    /// waiting for the next timed report. Absent means false, and it is
+    /// sent only when true, so an answer without it reads as before; it is
+    /// sent again at each renewal until the runner's next found report.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scan: bool,
 }
 
 /// Where a log line came from.

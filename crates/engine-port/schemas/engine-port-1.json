@@ -1276,6 +1276,10 @@
         "lease_until": {
           "format": "date-time",
           "type": "string"
+        },
+        "scan": {
+          "description": "Someone asked for a scan: report what is on the cluster now, without\nwaiting for the next timed report. Absent means false, and it is\nsent only when true, so an answer without it reads as before; it is\nsent again at each renewal until the runner's next found report.",
+          "type": "boolean"
         }
       },
       "required": [

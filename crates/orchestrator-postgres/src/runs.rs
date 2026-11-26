@@ -48,6 +48,9 @@ pub struct ClaimFor<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Renewal {
     pub cancel_requested: bool,
+    /// A scan was asked of the run's runner and its found report has not
+    /// arrived yet.
+    pub scan_requested: bool,
     /// The run's engine, whose hold the answer reads.
     pub engine: EngineName,
 }
@@ -146,13 +149,22 @@ impl PgStore {
         engine_ref: Option<&str>,
         lease_until: DateTime<Utc>,
     ) -> Result<Renewal, StoreError> {
+        // A run's runner is its runner's instance: the runner's name, `/`
+        // and the instance's own.
         let row = sqlx::query(
-            "UPDATE runs SET lease_until = $3,
-                    engine_ref = COALESCE($4, engine_ref),
-                    progress_fraction = COALESCE($5, progress_fraction),
-                    progress_detail = COALESCE($6, progress_detail)
-              WHERE id = $1::uuid AND state = 'running' AND lease = $2
-              RETURNING cancel_requested, engine",
+            "WITH r AS (
+               UPDATE runs SET lease_until = $3,
+                      engine_ref = COALESCE($4, engine_ref),
+                      progress_fraction = COALESCE($5, progress_fraction),
+                      progress_detail = COALESCE($6, progress_detail)
+                WHERE id = $1::uuid AND state = 'running' AND lease = $2
+                RETURNING cancel_requested, engine, line, runner)
+             SELECT r.cancel_requested, r.engine, EXISTS (
+                      SELECT 1 FROM runners n
+                       WHERE n.engine = r.engine AND n.line = r.line
+                         AND starts_with(r.runner, n.runner || '/')
+                         AND n.scan_requested_at IS NOT NULL) AS scan
+               FROM r",
         )
         .bind(run)
         .bind(lease)
@@ -165,6 +177,7 @@ impl PgStore {
         let row = row.ok_or(StoreError::Lease)?;
         Ok(Renewal {
             cancel_requested: row.try_get("cancel_requested")?,
+            scan_requested: row.try_get("scan")?,
             engine: EngineName::new(row.try_get("engine")?).map_err(|e| crate::corrupt(&e.0))?,
         })
     }

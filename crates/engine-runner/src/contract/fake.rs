@@ -247,6 +247,7 @@ impl Orchestrator for FakeOrchestrator {
             Ok(Renewed {
                 action,
                 lease_until: until(),
+                scan: false,
             })
         })
     }
