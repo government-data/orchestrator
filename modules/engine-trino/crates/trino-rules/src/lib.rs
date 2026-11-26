@@ -9,7 +9,9 @@
 //! 1. `qd-admin`, owner of everything;
 //! 2. people and `bi-superset` refused every `$` metadata table;
 //! 3. job users: a filter-free `SELECT` on `$refs` tables, then each job
-//!    grant (a report user also reads its tables' `$snapshots`);
+//!    grant (a report user also reads its tables' `$snapshots`; a
+//!    dataset's maintenance user also owns the tables of its own bronze
+//!    and silver schemas, to create and alter them);
 //! 4. people: each grant on `gold`, with its row filter;
 //! 5. `bi-superset`: gold's tables listed, no row read (`filter: false`);
 //! 6. the engine modules' own grants;
@@ -163,6 +165,22 @@ impl Grant {
             }
             _ => Ok(()),
         }
+    }
+
+    /// Whether the grant is a dataset's maintenance user's on its own
+    /// bronze or silver schema (`job_maint_<d>` on `<d>_bronze` or
+    /// `<d>_silver` of `lake_maint`): there it also owns the tables, which
+    /// Trino's file rules require to create a table or add a column (core
+    /// decision 0090, ruling 66: the `prepare` job).
+    pub(crate) fn owns_tables(&self) -> bool {
+        let Some(d) = self.subject.strip_prefix("job_maint_") else {
+            return false;
+        };
+        let (catalog, schema) = self.place();
+        let own = schema
+            .strip_prefix(d)
+            .is_some_and(|l| l == "_bronze" || l == "_silver");
+        catalog == "lake_maint" && own
     }
 
     /// The catalog and schema the grant is on.

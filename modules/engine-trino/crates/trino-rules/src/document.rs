@@ -104,7 +104,10 @@ fn table_rule(g: &Grant, filter: Option<String>) -> Map<String, Value> {
         rule.insert("schema".into(), json!(schema));
     }
     rule.insert("table".into(), json!(tables_of(g)));
-    let privileges: Vec<&str> = g.privileges.iter().map(|p| p.as_str()).collect();
+    let mut privileges: Vec<&str> = g.privileges.iter().map(|p| p.as_str()).collect();
+    if g.owns_tables() {
+        privileges.push("OWNERSHIP");
+    }
     rule.insert("privileges".into(), json!(privileges));
     if let Some(f) = filter {
         rule.insert("filter".into(), json!(f));
