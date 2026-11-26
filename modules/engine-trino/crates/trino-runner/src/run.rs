@@ -10,7 +10,7 @@ use serde_json::Value;
 use crate::bundle::{Bundle, PlaceholderType, RunAs};
 use crate::check::{class, fits};
 use crate::engine::{transient, TrinoEngine};
-use crate::ports::{Core, Trino};
+use crate::ports::{Core, Trino, TrinoUser};
 use crate::steps::{checked, column, fill, Known};
 
 impl<C: Core, T: Trino> TrinoEngine<C, T> {
@@ -45,7 +45,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                 RunAs::Job => token.to_string(),
                 RunAs::Report => match &report_token {
                     Some(t) => Clone::clone(t),
-                    None => match self.core.token(job, RunAs::Report).await {
+                    None => match self.core.token(job, TrinoUser::Report).await {
                         Ok(t) => report_token.insert(t).clone(),
                         Err(_) => return transient("core_unavailable"),
                     },

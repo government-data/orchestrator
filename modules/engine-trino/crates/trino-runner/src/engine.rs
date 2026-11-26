@@ -15,25 +15,37 @@ use orchestration_model::{EngineName, Interruption, Line};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 
-use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, RunAs, SignedBundle};
-use crate::ports::{Core, JobRequest, Trino};
+use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, SignedBundle};
+use crate::ports::{Core, JobRequest, Trino, TrinoUser};
 use crate::steps::Known;
 
-/// The job kinds of core decision 0090 (point 2).
-pub const KINDS: [&str; 12] = [
+/// The job kinds of core decision 0090 (point 2), with `prepare` (ruling
+/// 66), `rule_test` (ruling 54) and `backfill` (ruling 77).
+pub const KINDS: [&str; 15] = [
     "catalog",
     "tables",
     "map",
     "records",
+    "prepare",
     "extract",
     "derive",
     "evaluate",
+    "backfill",
     "test_rule",
+    "rule_test",
     "retract",
     "slas",
     "maintain",
     "reindex",
 ];
+
+/// A name the core gives a dataset or a source: `[a-z0-9_]`, 1 to 63.
+fn is_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 63
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
 
 /// How long a retry waits for the previous attempt's query to end.
 const KILL_WAIT: Duration = Duration::from_secs(60);
@@ -88,7 +100,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
     }
 
     /// The job the operator handed out: the run's kind and attempt, and
-    /// its dataset and cut from the parameters.
+    /// its dataset, cut and source from the parameters.
     fn request(run: &Claimed) -> Option<JobRequest> {
         let text = |k: &str| match run.parameters.get(k) {
             None | Some(Value::Null) => Some(None),
@@ -97,12 +109,9 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         };
         let dataset = text("dataset")?;
         let cut = text("cut")?;
-        let dataset_ok = dataset.as_deref().is_none_or(|d| {
-            !d.is_empty()
-                && d.len() <= 63
-                && d.bytes()
-                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-        });
+        let source = text("source")?;
+        let names_ok =
+            dataset.as_deref().is_none_or(is_name) && source.as_deref().is_none_or(is_name);
         let cut_ok = cut.as_deref().is_none_or(|c| {
             c.len() == 10
                 && c.bytes().enumerate().all(|(i, b)| {
@@ -113,14 +122,15 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                     }
                 })
         });
-        let known = run
-            .parameters
-            .as_object()
-            .is_some_and(|o| o.keys().all(|k| k == "dataset" || k == "cut"));
-        (dataset_ok && cut_ok && known).then(|| JobRequest {
+        let known = run.parameters.as_object().is_some_and(|o| {
+            o.keys()
+                .all(|k| ["dataset", "cut", "source"].contains(&k.as_str()))
+        });
+        (names_ok && cut_ok && known).then(|| JobRequest {
             kind: run.kind.clone(),
             dataset,
             cut,
+            source,
             attempt: run.attempt,
         })
     }
@@ -167,6 +177,9 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         let Some(request) = Self::request(run) else {
             return Outcome::failed("invalid_parameters");
         };
+        let Some(user) = TrinoUser::of_kind(&run.kind) else {
+            return Outcome::failed("kind_not_on_trino");
+        };
         // The core's job is the operator's run (core decision 0090, step 18).
         let job = run.run.clone();
         let signed = match self.core.bundle(&job, &request).await {
@@ -178,7 +191,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             Ok(_) => return Outcome::failed("bundle_invalid"),
             Err(o) => return o,
         };
-        let Ok(token) = self.core.token(&job, RunAs::Job).await else {
+        let Ok(token) = self.core.token(&job, user).await else {
             return transient("core_unavailable");
         };
         self.running
@@ -206,7 +219,8 @@ impl<C: Core, T: Trino> Engine for TrinoEngine<C, T> {
             "additionalProperties": false,
             "properties": {
                 "dataset": {"type": "string", "pattern": "^[a-z0-9_]{1,63}$"},
-                "cut": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}
+                "cut": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+                "source": {"type": "string", "pattern": "^[a-z0-9_]{1,63}$"}
             }
         });
         Descriptor {

@@ -8,13 +8,12 @@
 //!
 //! | Call | Answer |
 //! | --- | --- |
-//! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` (core #192) |
-//! | `POST /internal/jobs/{job}/token` `{"as": "job" \| "report"}` | `{"token": <JWT>}` |
-//! | `GET /internal/jobs/{job}/credentials` | `{"credentials": [{"name", "current", "previous"}]}` |
+//! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, source?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` |
+//! | `POST /internal/quality/v1/runs/{run}/trino-token` `{"user": "rules" \| "report" \| "maint" \| "extract" \| "source"}` | `{"access_token": <JWT>, "expires_in"}` |
+//! | `POST /internal/quality/v1/runs/{run}/source-secrets` | `{"current": {<name>: <value>}, "previous": {…} \| null}` |
 //! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
-//! The last three are the shapes the user accepted on 2026-11-25 for the
-//! core to build. The provider's keys are its JWKS (`<issuer>/oauth/jwks`).
+//! The provider's keys are its JWKS (`<issuer>/oauth/jwks`).
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -25,7 +24,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use trino_client::TrinoClient;
 use trino_runner::{
-    Answer, Core, CoreError, Credential, JobRequest, Keys, RunAs, SignedBundle, Trino, TrinoFailure,
+    Answer, Core, CoreError, Credential, JobRequest, Keys, SignedBundle, Trino, TrinoFailure,
+    TrinoUser,
 };
 
 pub mod guard;
@@ -169,37 +169,38 @@ impl HttpCore {
     }
 }
 
-fn job_path(job: &str, what: &str) -> Result<String, CoreError> {
-    let safe = job.len() == 36 && job.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+/// A run's route on the core, for a run id that is safe in a path.
+fn run_path(run: &str, what: &str) -> Result<String, CoreError> {
+    let safe = !run.is_empty()
+        && run.len() <= 64
+        && run
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     if safe {
-        Ok(format!("/internal/jobs/{job}/{what}"))
+        Ok(format!("/internal/quality/v1/runs/{run}/{what}"))
     } else {
-        Err(CoreError("not a job id".into()))
+        Err(CoreError("not a run id".into()))
     }
 }
 
+/// A source's extra credentials by name: the current ones and, for one
+/// retry on a refused login, the previous ones.
 #[derive(Deserialize)]
-struct WireCredential {
-    name: String,
-    current: String,
-    previous: Option<String>,
+struct WireSecrets {
+    current: BTreeMap<String, String>,
+    #[serde(default)]
+    previous: Option<BTreeMap<String, String>>,
 }
 
 #[async_trait]
 impl Core for HttpCore {
     async fn bundle(&self, run: &str, job: &JobRequest) -> Result<SignedBundle, CoreError> {
-        let safe = !run.is_empty()
-            && run.len() <= 64
-            && run
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-        if !safe {
-            return Err(CoreError("not a run id".into()));
-        }
-        let body = json!({"kind": job.kind, "dataset": job.dataset, "cut": job.cut,
+        let mut body = json!({"kind": job.kind, "dataset": job.dataset, "cut": job.cut,
             "attempt": job.attempt});
-        let path = format!("/internal/quality/v1/runs/{run}/bundle");
-        let v = self.get(&path, Some(body)).await?;
+        if let Some(source) = &job.source {
+            body["source"] = json!(source);
+        }
+        let v = self.get(&run_path(run, "bundle")?, Some(body)).await?;
         match (v["bundle"].as_str(), v["digest"].as_str()) {
             (Some(jws), Some(digest)) => Ok(SignedBundle {
                 jws: jws.to_string(),
@@ -223,30 +224,27 @@ impl Core for HttpCore {
         Ok(Keys::from_jwks(&v))
     }
 
-    async fn token(&self, job: &str, run_as: RunAs) -> Result<String, CoreError> {
-        let who = match run_as {
-            RunAs::Job => "job",
-            RunAs::Report => "report",
-        };
-        let v = self
-            .get(&job_path(job, "token")?, Some(json!({"as": who})))
-            .await?;
-        v["token"]
+    async fn token(&self, job: &str, user: TrinoUser) -> Result<String, CoreError> {
+        let body = json!({"user": user.as_str()});
+        let v = self.get(&run_path(job, "trino-token")?, Some(body)).await?;
+        v["access_token"]
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| CoreError("token: shape".into()))
     }
 
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError> {
-        let v = self.get(&job_path(job, "credentials")?, None).await?;
-        let list: Vec<WireCredential> = serde_json::from_value(v["credentials"].clone())
-            .map_err(|_| CoreError("credentials: shape".into()))?;
-        Ok(list
+        let v = self
+            .get(&run_path(job, "source-secrets")?, Some(json!({})))
+            .await?;
+        let mut s: WireSecrets =
+            serde_json::from_value(v).map_err(|_| CoreError("source secrets: shape".into()))?;
+        Ok(s.current
             .into_iter()
-            .map(|c| Credential {
-                name: c.name,
-                current: c.current,
-                previous: c.previous,
+            .map(|(name, current)| Credential {
+                previous: s.previous.as_mut().and_then(|p| p.remove(&name)),
+                name,
+                current,
             })
             .collect())
     }

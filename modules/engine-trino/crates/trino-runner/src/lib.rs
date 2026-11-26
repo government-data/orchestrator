@@ -17,4 +17,4 @@ pub use bundle::{
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};
-pub use ports::{Core, CoreError, Credential, JobRequest, Trino, TrinoFailure};
+pub use ports::{Core, CoreError, Credential, JobRequest, Trino, TrinoFailure, TrinoUser};

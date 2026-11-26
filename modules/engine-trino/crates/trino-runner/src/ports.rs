@@ -4,7 +4,7 @@
 
 use async_trait::async_trait;
 
-use crate::bundle::{Keys, RunAs, SignedBundle};
+use crate::bundle::{Keys, SignedBundle};
 use crate::check::Answer;
 
 /// The core could not answer (a class, never a body).
@@ -36,7 +36,52 @@ pub struct JobRequest {
     pub kind: String,
     pub dataset: Option<String>,
     pub cut: Option<String>,
+    /// The source a source's job reads (a `tables` listing).
+    pub source: Option<String>,
     pub attempt: u32,
+}
+
+/// A job's Trino user, as the core's token route names it
+/// (`job_<user>_<dataset or source>`, core decision 0090, point 7.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrinoUser {
+    /// Reads its dataset's layers and writes gold and the scratch rows.
+    Rules,
+    /// Reads gold and its tables' `$refs`: a statement `run_as` report.
+    Report,
+    /// Prepares and maintains its dataset's bronze and silver.
+    Maint,
+    /// Reads its source and loads its dataset's bronze.
+    Extract,
+    /// Reads one source's catalog (a `tables` listing).
+    Source,
+}
+
+impl TrinoUser {
+    /// Its name on the core's token route.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Rules => "rules",
+            Self::Report => "report",
+            Self::Maint => "maint",
+            Self::Extract => "extract",
+            Self::Source => "source",
+        }
+    }
+
+    /// The user a job of `kind` runs its own statements as; `None` for a
+    /// kind the core compiles no Trino bundle for.
+    #[must_use]
+    pub fn of_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "evaluate" | "backfill" | "rule_test" | "retract" | "slas" => Some(Self::Rules),
+            "prepare" => Some(Self::Maint),
+            "extract" => Some(Self::Extract),
+            "tables" => Some(Self::Source),
+            _ => None,
+        }
+    }
 }
 
 /// The core, over mTLS with the runner's machine identity.
@@ -47,8 +92,8 @@ pub trait Core: Send + Sync + 'static {
     async fn bundle(&self, run: &str, job: &JobRequest) -> Result<SignedBundle, CoreError>;
     /// The provider's public keys (its JWKS).
     async fn keys(&self) -> Result<Keys, CoreError>;
-    /// A Trino token for the job, as its own user or its report user.
-    async fn token(&self, job: &str, run_as: RunAs) -> Result<String, CoreError>;
+    /// A Trino token for the job as one of its users.
+    async fn token(&self, job: &str, user: TrinoUser) -> Result<String, CoreError>;
     /// The secrets of the source the job reads (none for most kinds).
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError>;
 }
