@@ -662,6 +662,7 @@ dependencies = [
  "engine-runner",
  "logging",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "tokio",

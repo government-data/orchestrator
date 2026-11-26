@@ -6,12 +6,14 @@
 //! (the coordinator's release), `QD_OIDC_ISSUER` (the provider, whose JWKS
 //! verifies the bundles), `QD_OIDC_MACHINE_CLIENT_ID` and the machine
 //! secret file, `QD_MACHINE_DIR` (default `/run/qd-node`),
-//! `RUNNER_CONCURRENCY` (default 1), `RUNNER_NAME` (default the host name).
+//! `RUNNER_CONCURRENCY` (default 1), `RUNNER_NAME` (default the host name),
+//! `QD_WORKER_MIN_FREE_BYTES` and `QD_WORKER_MIN_FREE_MEMORY_PCT` (the
+//! guard's minimums).
 
 use std::path::Path;
 use std::time::Duration;
 
-use engine_runner::{HttpOrchestrator, NoGuard, Runner};
+use engine_runner::{HttpOrchestrator, Runner};
 use engine_trino_service::{core_from_env, machine_client, setting, setting_or, ClientTrino};
 use trino_client::TrinoClient;
 use trino_runner::TrinoEngine;
@@ -40,7 +42,12 @@ async fn run() -> Result<(), String> {
     );
     let orchestrator = HttpOrchestrator::new(client, &setting("ORCHESTRATOR_URL")?);
     let name = setting_or("RUNNER_NAME", &setting_or("HOSTNAME", "runner"));
-    let runner = Runner::new(engine, orchestrator, NoGuard, &name);
+    let runner = Runner::new(
+        engine,
+        orchestrator,
+        engine_trino_service::guard::from_env()?,
+        &name,
+    );
     while let Err(e) = runner.register().await {
         tracing::warn!(error = %e, "registration refused or unreachable; again in 10 s");
         tokio::time::sleep(Duration::from_secs(10)).await;
