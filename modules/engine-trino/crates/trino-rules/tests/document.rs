@@ -151,3 +151,25 @@ fn unknown_fields_are_refused() {
         "namespace": "n", "tables": ["*"], "privileges": ["SELECT"], "mask": "x"}]));
     assert!(r.is_err());
 }
+
+#[test]
+fn a_refs_table_is_granted_by_its_exact_name() {
+    let g = grants(json!([
+        {"subject": "job_report_loans", "namespace": "loans_silver", "tables": ["records$refs"],
+         "privileges": ["SELECT"]},
+        {"subject": "job_report_loans", "namespace": "loans_silver", "tables": ["records$files"],
+         "privileges": ["SELECT"]},
+        {"subject": "job_report_loans", "namespace": "loans_silver", "tables": ["$refs"],
+         "privileges": ["SELECT"]}
+    ]));
+    let (doc, invalid) = document(&g, &[]);
+    assert_eq!(invalid.len(), 2, "another $ table, and no base table");
+    let t = tables(&doc);
+    let rules: Vec<&Value> = t
+        .iter()
+        .filter(|r| r["user"] == "job_report_loans" && r["schema"] == "loans_silver")
+        .collect();
+    assert_eq!(rules.len(), 1, "no $snapshots rule on a $refs grant");
+    assert_eq!(rules[0]["table"], "(records[$]refs)");
+    assert_eq!(rules[0]["privileges"], json!(["SELECT"]));
+}

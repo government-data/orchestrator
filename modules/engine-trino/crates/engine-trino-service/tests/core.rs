@@ -23,7 +23,14 @@ async fn core() -> HttpCore {
         )
         .route(
             "/oauth/token",
-            post(|| async { Json(json!({"access_token": "m", "expires_in": 300})) }),
+            post(|body: String| async move {
+                let aud = if body.contains("audience=quality-grants") {
+                    "g"
+                } else {
+                    "m"
+                };
+                Json(json!({"access_token": aud, "expires_in": 300}))
+            }),
         )
         .route(
             "/oauth/jwks",
@@ -49,7 +56,7 @@ async fn core() -> HttpCore {
             }),
         )
         .route(
-            "/api/internal/trino/grants",
+            "/api/internal/quality/v1/job-grants",
             get(|| async {
                 Json(
                     json!({"grants": [{"subject": "job_sample_loans", "namespace": "loans_silver",

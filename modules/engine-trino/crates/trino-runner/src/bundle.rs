@@ -73,13 +73,13 @@ pub struct Statement {
     /// credentials (point 7.5).
     #[serde(default)]
     pub reads_source: bool,
-    /// On a `DELETE`: run only if the earlier count it names was not 0
+    /// Run only if the earlier count it names was not 0
     /// (amendment A1); otherwise it is skipped.
     #[serde(default)]
     pub only_if_rows: Option<OnlyIfRows>,
 }
 
-/// The count a `DELETE` waits on.
+/// The count a statement waits on.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OnlyIfRows {

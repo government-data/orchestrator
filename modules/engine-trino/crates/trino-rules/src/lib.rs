@@ -91,6 +91,16 @@ pub(crate) fn is_name(s: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// A table a grant names: a name, or a name and its `$refs` metadata
+/// table (the only one a grant may name, core ruling of 2026-11-25).
+pub(crate) fn is_table(s: &str) -> bool {
+    match s.split_once('$') {
+        Some((base, "refs")) => is_name(base),
+        Some(_) => false,
+        None => is_name(s),
+    }
+}
+
 /// Who a subject is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Subject {
@@ -141,8 +151,8 @@ impl Grant {
         if who == Subject::Person && (!gold || self.privileges != [Privilege::Select]) {
             return bad("a person reads gold.quality_gold only");
         }
-        if self.tables.is_empty() || !self.tables.iter().all(|t| t == "*" || is_name(t)) {
-            return bad("tables: * or [a-z0-9_] names");
+        if self.tables.is_empty() || !self.tables.iter().all(|t| t == "*" || is_table(t)) {
+            return bad("tables: * or [a-z0-9_] names, or a name with `$refs`");
         }
         if self.privileges.is_empty() {
             return bad("privileges: at least one");
