@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::Utc;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, LogLine, Logs, Registered, Renew, RenewAction, Renewed,
-    Resume, LEASE_SECS, RENEW_EVERY_SECS,
+    Claim, Claimed, Descriptor, Finish, Found, FoundAnswer, Inventory, InventoryAnswer, LogLine,
+    Logs, Registered, Renew, RenewAction, Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
 };
 use orchestration_model::RunState;
 use serde_json::Value;
@@ -42,6 +42,9 @@ struct State {
     runs: BTreeMap<String, FakeRun>,
     next: u64,
     held: bool,
+    found: Found,
+    /// The inventory was adopted: later reports change nothing.
+    adopted: bool,
 }
 
 /// The fake orchestrator; clones share one state.
@@ -108,6 +111,12 @@ impl FakeOrchestrator {
     #[must_use]
     pub fn registered(&self) -> Vec<Descriptor> {
         self.with(|s| s.registered.clone())
+    }
+
+    /// The last report of what the runner found.
+    #[must_use]
+    pub fn found(&self) -> Found {
+        self.with(|s| s.found.clone())
     }
 
     /// The engine's drain hold on or off: while on, claims get nothing and
@@ -214,6 +223,37 @@ impl Orchestrator for FakeOrchestrator {
             entry.counts.clone_from(&f.counts);
             entry.error_class.clone_from(&f.error_class);
             Ok(())
+        })
+    }
+
+    async fn found(&self, _: &Descriptor, f: &Found) -> Result<FoundAnswer, CallError> {
+        f.validate()
+            .map_err(|e| CallError::Refused(400, e.to_string()))?;
+        let mut kept = f.clone();
+        kept.artefacts.retain(|a| a.problem().is_none());
+        let count = u32::try_from(kept.artefacts.len()).unwrap_or(u32::MAX);
+        self.with(|s| s.found = kept);
+        Ok(FoundAnswer {
+            kept: count,
+            relinked: 0,
+        })
+    }
+
+    /// Adopts once, registering every flow again (the fake knows none).
+    async fn inventory(&self, _: &Descriptor, i: &Inventory) -> Result<InventoryAnswer, CallError> {
+        i.validate()
+            .map_err(|e| CallError::Refused(400, e.to_string()))?;
+        if self.with(|s| std::mem::replace(&mut s.adopted, true)) {
+            return Ok(InventoryAnswer {
+                already_adopted: true,
+                ..InventoryAnswer::default()
+            });
+        }
+        let (latest, skipped) = i.clone().latest();
+        Ok(InventoryAnswer {
+            registered: latest.into_iter().map(|l| l.record.flow).collect(),
+            skipped,
+            ..InventoryAnswer::default()
         })
     }
 }
