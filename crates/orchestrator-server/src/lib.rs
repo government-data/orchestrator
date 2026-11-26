@@ -20,7 +20,7 @@ mod sealer;
 mod token;
 
 pub use clock::{Clock, FixedClock, SystemClock};
-pub use core_api::{CoreToken, HttpMachineList, MachineClient, CORE_AUDIENCE};
+pub use core_api::{CoreToken, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE};
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use machines::MachineList;

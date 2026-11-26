@@ -3,6 +3,7 @@
 //! so a line removed by hand or by an old agent stops firing. The core's
 //! answer is cached by the scheduler; when the core cannot be read, the
 //! last list is kept, and before any list every registered line counts.
+//! Its HTTP adapter is [`crate::HttpModuleList`].
 
 use std::collections::HashSet;
 
