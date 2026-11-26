@@ -14,13 +14,17 @@
 //! | `POST /internal/engines/{engine}/release` | [`Release`] | 204 |
 //! | `PUT /internal/engines/{engine}/{line}/found` | [`Found`] | [`FoundAnswer`] |
 //! | `PUT /internal/engines/{engine}/{line}/inventory` | [`Inventory`] | [`InventoryAnswer`] |
+//! | `POST /internal/engines/{engine}/{line}/deploys/claim` | [`Claim`] | [`DeployClaimed`], or 204 |
+//! | `POST /internal/deploys/{id}/finish` | [`DeployFinish`] | 204 |
 
+mod deploys;
 mod descriptor;
 mod found;
 mod inventory;
 mod runs;
 mod schema;
 
+pub use deploys::{DeployClaimed, DeployFinish, DeployState, MAX_VERSION_BYTES};
 pub use descriptor::{
     check_port, is_kind_name, Descriptor, Refused, Registered, RunKind, LEASE_SECS,
     MAX_CONCURRENCY, MAX_KINDS, PORT, RENEW_EVERY_SECS, SERVED_PORTS,

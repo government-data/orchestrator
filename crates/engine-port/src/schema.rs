@@ -6,8 +6,9 @@ use schemars::{json_schema, Schema, SchemaGenerator};
 use serde_json::{json, Value};
 
 use crate::{
-    ArtefactRecord, Claim, Claimed, Descriptor, Finish, Found, FoundAnswer, Hold, HoldAnswer,
-    Inventory, InventoryAnswer, Logs, Registered, Release, Renew, Renewed,
+    ArtefactRecord, Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, Found,
+    FoundAnswer, Hold, HoldAnswer, Inventory, InventoryAnswer, Logs, Registered, Release, Renew,
+    Renewed,
 };
 
 pub(crate) fn engine_name(_: &mut SchemaGenerator) -> Schema {
@@ -60,5 +61,7 @@ pub fn schemas() -> Value {
     add("Inventory", schemars::schema_for!(Inventory));
     add("InventoryAnswer", schemars::schema_for!(InventoryAnswer));
     add("ArtefactRecord", schemars::schema_for!(ArtefactRecord));
+    add("DeployClaimed", schemars::schema_for!(DeployClaimed));
+    add("DeployFinish", schemars::schema_for!(DeployFinish));
     json!({ "port": crate::PORT, "messages": all })
 }
