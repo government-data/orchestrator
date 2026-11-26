@@ -56,6 +56,8 @@ struct State {
     found: Found,
     /// The inventory was adopted: later reports change nothing.
     adopted: bool,
+    /// A scan was asked: renewals say so until the next found report.
+    scan: bool,
 }
 
 /// The fake orchestrator; clones share one state.
@@ -164,6 +166,17 @@ impl FakeOrchestrator {
         self.with(|s| s.registered.clone())
     }
 
+    /// Asks the runner for a scan, as a person would.
+    pub fn request_scan(&self) {
+        self.with(|s| s.scan = true);
+    }
+
+    /// Whether a scan asked waits for the runner's found report.
+    #[must_use]
+    pub fn scan_pending(&self) -> bool {
+        self.with(|s| s.scan)
+    }
+
     /// The last report of what the runner found.
     #[must_use]
     pub fn found(&self) -> Found {
@@ -231,7 +244,7 @@ impl Orchestrator for FakeOrchestrator {
 
     async fn renew(&self, run: &str, r: &Renew) -> Result<Renewed, CallError> {
         self.with(|s| {
-            let held = s.held;
+            let (held, scan) = (s.held, s.scan);
             let entry = Self::leased(s, run, &r.lease)?;
             if r.engine_ref.is_some() {
                 entry.engine_ref.clone_from(&r.engine_ref);
@@ -247,7 +260,7 @@ impl Orchestrator for FakeOrchestrator {
             Ok(Renewed {
                 action,
                 lease_until: until(),
-                scan: false,
+                scan,
             })
         })
     }
@@ -284,7 +297,10 @@ impl Orchestrator for FakeOrchestrator {
         let mut kept = f.clone();
         kept.artefacts.retain(|a| a.problem().is_none());
         let count = u32::try_from(kept.artefacts.len()).unwrap_or(u32::MAX);
-        self.with(|s| s.found = kept);
+        self.with(|s| {
+            s.found = kept;
+            s.scan = false;
+        });
         Ok(FoundAnswer {
             kept: count,
             relinked: 0,
@@ -353,6 +369,14 @@ impl Orchestrator for FakeOrchestrator {
 
 #[async_trait]
 impl Seed for FakeOrchestrator {
+    async fn request_scan(&self) {
+        FakeOrchestrator::request_scan(self);
+    }
+
+    async fn scan_pending(&self) -> bool {
+        FakeOrchestrator::scan_pending(self)
+    }
+
     async fn queue_deploy(&self) -> String {
         self.queue_import("/srv/found/contract")
     }

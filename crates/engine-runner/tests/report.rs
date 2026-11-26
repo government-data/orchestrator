@@ -108,3 +108,38 @@ async fn an_engine_without_artefacts_reports_nothing() {
     assert_eq!(runner.report_found().await.unwrap(), None);
     assert_eq!(fake.found(), Found::default());
 }
+
+#[tokio::test]
+async fn a_found_report_is_due_on_its_timer_or_sooner_on_a_scan_asked() {
+    use std::time::Duration;
+
+    use engine_runner::contract::{FakeEngine, Seed};
+    use engine_runner::FoundDue;
+
+    let fake = FakeOrchestrator::default();
+    let runner = Runner::new(FakeEngine::default(), fake.clone(), NoGuard, "r1")
+        .renewing_every(Duration::from_millis(100));
+    let long = Duration::from_secs(10);
+    assert_eq!(
+        runner.found_due(Duration::from_millis(200)).await,
+        FoundDue::Timer,
+        "nothing asked: the timer"
+    );
+
+    // A scan reaches the runner only at a renewal, so while a run is leased.
+    fake.request_scan();
+    let run = fake.queue(json!({"behave": "wait"})).await;
+    let task = runner.claim_once().await.unwrap().expect("claimed");
+    let start = tokio::time::Instant::now();
+    assert_eq!(runner.found_due(long).await, FoundDue::Requested);
+    assert!(start.elapsed() < long, "at the next renewal, not the timer");
+    runner.report_found().await.unwrap().expect("reported");
+    assert!(!fake.scan_pending(), "the report answers it");
+    assert_eq!(
+        runner.found_due(Duration::from_millis(500)).await,
+        FoundDue::Timer,
+        "answered: renewals say no more scan"
+    );
+    fake.cancel(&run).await;
+    task.await.unwrap();
+}

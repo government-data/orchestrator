@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use engine_port::{
-    Claim, Claimed, DeployFinish, DeployState, Descriptor, LogStream, RunKind, PORT,
+    Claim, Claimed, DeployFinish, DeployState, Descriptor, Found, LogStream, RunKind, PORT,
 };
 use orchestration_model::{EngineName, Line};
 use serde_json::{json, Value};
@@ -39,10 +39,16 @@ pub trait Seed: Send + Sync {
     async fn queue_deploy(&self) -> String;
     /// A deploy's state as stored (`queued`, `claimed`, `succeeded`, …).
     async fn deploy_state(&self, deploy: &str) -> String;
+    /// Asks the fake engine's runner on the runner's cluster for a scan, as
+    /// a person would.
+    async fn request_scan(&self);
+    /// Whether that scan still waits for the runner's found report.
+    async fn scan_pending(&self) -> bool;
 }
 
 /// An engine that does what a run's `behave` parameter says: `succeed`,
-/// `fail`, or `wait` until it is cancelled.
+/// `fail`, or `wait` until it is cancelled; it finds nothing on its
+/// cluster, and reports that.
 #[derive(Debug, Default, Clone)]
 pub struct FakeEngine {
     cancelled: Arc<Notify>,
@@ -97,6 +103,10 @@ impl Engine for FakeEngine {
         self.cancelled.notify_waiters();
         Ok(())
     }
+
+    async fn found(&self) -> Option<Found> {
+        Some(Found::default())
+    }
 }
 
 async fn claim_until<O: Orchestrator>(
@@ -121,6 +131,7 @@ pub async fn run_suite<O: Orchestrator>(orchestrator: O, seed: &dyn Seed) {
         .expect("the descriptor is registered");
     assert_eq!(registered.port, PORT);
     deploy_case(runner.orchestrator(), seed).await;
+    scan_case(&runner, seed).await;
 
     let run = seed.queue(json!({"behave": "succeed"})).await;
     let ended = claim_until(&runner).await.await.expect("the run task ends");
@@ -204,4 +215,36 @@ async fn deploy_case<O: Orchestrator>(orchestrator: &O, seed: &dyn Seed) {
     assert_eq!(seed.deploy_state(&id).await, "succeeded");
     let next = orchestrator.claim_deploy(&d, &claim).await.unwrap();
     assert!(next.is_none(), "a finished deploy is not handed out again");
+}
+
+/// A scan asked by a person reaches the runner at a renewal, without
+/// waiting for the timer, and its found report answers it.
+async fn scan_case<O: Orchestrator>(runner: &Runner<FakeEngine, O, NoGuard>, seed: &dyn Seed) {
+    runner
+        .report_found()
+        .await
+        .expect("the found report at start")
+        .expect("the fake engine reports");
+    seed.request_scan().await;
+    let run = seed.queue(json!({"behave": "wait"})).await;
+    let task = claim_until(runner).await;
+    let due = tokio::time::timeout(
+        Duration::from_secs(10),
+        runner.found_due(crate::FOUND_EVERY),
+    )
+    .await
+    .expect("a scan asked reaches the runner at its next renewal");
+    assert_eq!(due, crate::FoundDue::Requested);
+    assert!(seed.scan_pending().await, "asked until it reports");
+    runner
+        .report_found()
+        .await
+        .expect("the found report on request")
+        .expect("the fake engine reports");
+    assert!(!seed.scan_pending().await, "its report answers the scan");
+    seed.cancel(&run).await;
+    tokio::time::timeout(Duration::from_secs(10), task)
+        .await
+        .expect("the waiting run is cancelled")
+        .expect("the run task ends");
 }

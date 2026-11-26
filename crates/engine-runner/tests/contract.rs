@@ -10,7 +10,9 @@ use engine_runner::contract::{run_suite, Seed, FAKE_ENGINE};
 use engine_runner::HttpOrchestrator;
 use orchestration_model::{EngineLine, EngineName, Line, OnInterrupt, Trigger};
 use orchestrator_postgres::{NewDeploy, NewFlow, NewRun, PgStore};
-use orchestrator_server::{router, Authenticate, EnginePort, Machine, PortState, SystemClock};
+use orchestrator_server::{
+    router, runner_of, Authenticate, EnginePort, Machine, PortState, ScanAsked, SystemClock,
+};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use testcontainers::runners::AsyncRunner;
@@ -86,6 +88,21 @@ impl Seed for StoreSeed {
     async fn deploy_state(&self, deploy: &str) -> String {
         self.store.deploy(deploy).await.unwrap().unwrap().state
     }
+
+    async fn request_scan(&self) {
+        let port = EnginePort::new(self.store.clone(), SystemClock);
+        let asked = port.request_scan(&machine(), &engine()).await.unwrap();
+        assert_eq!(asked, ScanAsked::Asked);
+    }
+
+    async fn scan_pending(&self) -> bool {
+        let runner = runner_of(&machine(), &engine());
+        self.store.scan_requested(&runner).await.unwrap().is_some()
+    }
+}
+
+fn machine() -> Machine {
+    Machine("machine-1".into())
 }
 
 #[tokio::test]
