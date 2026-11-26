@@ -23,6 +23,12 @@ use crate::{Clock, EnginePort, Machine, PortError};
 #[async_trait]
 pub trait Authenticate: Send + Sync + 'static {
     async fn machine(&self, headers: &HeaderMap) -> Option<Machine>;
+
+    /// The engine module the call comes from, when the adapter knows it
+    /// (its machine client's token).
+    async fn module(&self, _headers: &HeaderMap) -> Option<String> {
+        None
+    }
 }
 
 /// What the engine port's handlers share.
@@ -41,7 +47,7 @@ type Shared<C> = State<Arc<PortState<C>>>;
 
 /// The caller's machine, or 401.
 #[derive(Debug)]
-pub struct Caller(pub Machine);
+pub struct Caller(pub Machine, pub Option<String>);
 
 impl<C: Clock> FromRequestParts<Arc<PortState<C>>> for Caller {
     type Rejection = ApiError;
@@ -51,7 +57,7 @@ impl<C: Clock> FromRequestParts<Arc<PortState<C>>> for Caller {
         state: &Arc<PortState<C>>,
     ) -> Result<Self, Self::Rejection> {
         match state.auth.machine(&parts.headers).await {
-            Some(m) => Ok(Self(m)),
+            Some(m) => Ok(Self(m, state.auth.module(&parts.headers).await)),
             None => Err(ApiError::Unauthorized),
         }
     }
@@ -127,7 +133,7 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
 
 async fn register<C: Clock>(
     State(s): Shared<C>,
-    Caller(m): Caller,
+    Caller(m, _): Caller,
     Path((engine, line)): Path<(String, String)>,
     Json(d): Json<Descriptor>,
 ) -> Result<Response, ApiError> {
@@ -138,7 +144,7 @@ async fn register<C: Clock>(
 
 async fn claim<C: Clock>(
     State(s): Shared<C>,
-    Caller(m): Caller,
+    Caller(m, _): Caller,
     Path((engine, line)): Path<(String, String)>,
     Json(c): Json<Claim>,
 ) -> Result<Response, ApiError> {
@@ -151,7 +157,7 @@ async fn claim<C: Clock>(
 
 async fn renew<C: Clock>(
     State(s): Shared<C>,
-    Caller(_): Caller,
+    Caller(..): Caller,
     Path(id): Path<String>,
     Json(r): Json<Renew>,
 ) -> Result<Response, ApiError> {
@@ -160,7 +166,7 @@ async fn renew<C: Clock>(
 
 async fn logs<C: Clock>(
     State(s): Shared<C>,
-    Caller(_): Caller,
+    Caller(..): Caller,
     Path(id): Path<String>,
     Json(l): Json<Logs>,
 ) -> Result<StatusCode, ApiError> {
@@ -170,7 +176,7 @@ async fn logs<C: Clock>(
 
 async fn finish<C: Clock>(
     State(s): Shared<C>,
-    Caller(_): Caller,
+    Caller(..): Caller,
     Path(id): Path<String>,
     Json(f): Json<Finish>,
 ) -> Result<StatusCode, ApiError> {
@@ -180,7 +186,7 @@ async fn finish<C: Clock>(
 
 async fn hold<C: Clock>(
     State(s): Shared<C>,
-    Caller(_): Caller,
+    Caller(..): Caller,
     Path(engine): Path<String>,
     Json(h): Json<Hold>,
 ) -> Result<Response, ApiError> {
@@ -191,7 +197,7 @@ async fn hold<C: Clock>(
 
 async fn release<C: Clock>(
     State(s): Shared<C>,
-    Caller(_): Caller,
+    Caller(..): Caller,
     Path(engine): Path<String>,
     Json(r): Json<Release>,
 ) -> Result<StatusCode, ApiError> {
