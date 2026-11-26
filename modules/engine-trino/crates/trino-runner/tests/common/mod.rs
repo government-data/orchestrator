@@ -137,6 +137,10 @@ impl Core for FakeCore {
 #[derive(Debug, Clone)]
 pub enum Script {
     Count(u64),
+    /// A one-row read: its columns (name, type) and its row.
+    Read(Vec<(&'static str, &'static str)>, Value),
+    /// A `DELETE` that removed this many rows.
+    Deleted(u64),
     Fail(&'static str),
     Wait,
 }
@@ -195,6 +199,21 @@ impl Trino for FakeTrino {
             Script::Count(c) => Ok(Answer {
                 query_id: Some(id),
                 update_type: Some("INSERT".into()),
+                columns: vec![("rows".into(), "bigint".into())],
+                rows: vec![vec![json!(c)]],
+            }),
+            Script::Read(cols, row) => Ok(Answer {
+                query_id: Some(id),
+                update_type: None,
+                columns: cols
+                    .iter()
+                    .map(|(n, t)| (n.to_string(), t.to_string()))
+                    .collect(),
+                rows: vec![row.as_array().unwrap().clone()],
+            }),
+            Script::Deleted(c) => Ok(Answer {
+                query_id: Some(id),
+                update_type: Some("DELETE".into()),
                 columns: vec![("rows".into(), "bigint".into())],
                 rows: vec![vec![json!(c)]],
             }),

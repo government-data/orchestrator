@@ -73,6 +73,45 @@ pub struct Statement {
     /// credentials (point 7.5).
     #[serde(default)]
     pub reads_source: bool,
+    /// On a `DELETE`: run only if the earlier count it names was not 0
+    /// (amendment A1); otherwise it is skipped.
+    #[serde(default)]
+    pub only_if_rows: Option<OnlyIfRows>,
+}
+
+/// The count a `DELETE` waits on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OnlyIfRows {
+    pub after: String,
+}
+
+/// A placeholder's type: both are decimal integers of at most 19 digits;
+/// only a `bigint` may be negative. There is no text type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlaceholderType {
+    SnapshotId,
+    Bigint,
+}
+
+/// Where a placeholder's value comes from: a column of an earlier
+/// statement's one-row answer.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    pub statement: String,
+    pub column: String,
+}
+
+/// A `{{name}}` token the runner fills (amendment A1).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Placeholder {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub kind: PlaceholderType,
+    pub from: Source,
 }
 
 impl std::fmt::Debug for Statement {
@@ -99,6 +138,9 @@ pub struct Bundle {
     pub catalog_commit: Option<String>,
     pub compiler_version: String,
     pub statements: Vec<Statement>,
+    /// The tokens its statements hold, each filled from an earlier answer.
+    #[serde(default)]
+    pub placeholders: Vec<Placeholder>,
 }
 
 /// Why a bundle is refused: a class, never the bundle's content.
@@ -235,6 +277,7 @@ impl SignedBundle {
         if bundle.job_id != job || bundle.statements.is_empty() || !ids_ok {
             return Err(BundleRefused::Content);
         }
+        crate::steps::check(&bundle).map_err(|_| BundleRefused::Content)?;
         Ok(bundle)
     }
 }
