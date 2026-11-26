@@ -1,7 +1,8 @@
-//! The core's `GET /v1/machines` as `HttpMachineList` reads it, against a
-//! stand-in core over HTTP: the listed machines are live; a 401, a 503, a
-//! malformed body or no token is no answer (so nothing is adopted); the
-//! machine client's token is kept and fetched again after a 401.
+//! The core's `GET /v1/machines` and `GET /v1/modules` as `HttpMachineList`
+//! and `HttpModuleList` read them, against a stand-in core over HTTP: the
+//! listed names are the answer; a 401, a 503, a malformed body or no token
+//! is no answer (so nothing is adopted); the machine client's token is
+//! shared, kept and fetched again after a 401.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,9 +12,12 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
-use orchestrator_server::{CoreToken, HttpMachineList, MachineClient, MachineList};
+use orchestrator_server::{
+    CoreToken, HttpMachineList, HttpModuleList, MachineClient, MachineList, ModuleList,
+};
 
-/// What the stand-in core answers to `GET /api/v1/machines`.
+/// What the stand-in core answers to `GET /api/v1/machines` and
+/// `/api/v1/modules`.
 #[derive(Clone)]
 struct Core {
     answer: Arc<Mutex<(StatusCode, String)>>,
@@ -36,7 +40,7 @@ async fn token(State(core): State<Core>, headers: HeaderMap, body: String) -> Re
     ([("content-type", "application/json")], body).into_response()
 }
 
-async fn machines(State(core): State<Core>, headers: HeaderMap) -> Response {
+async fn listing(State(core): State<Core>, headers: HeaderMap) -> Response {
     let n = core.tokens.load(Ordering::SeqCst);
     if headers.get("authorization").and_then(|h| h.to_str().ok()) != Some(&format!("Bearer t{n}")) {
         return StatusCode::UNAUTHORIZED.into_response();
@@ -45,7 +49,7 @@ async fn machines(State(core): State<Core>, headers: HeaderMap) -> Response {
     (status, [("content-type", "application/json")], body).into_response()
 }
 
-async fn start() -> (Core, HttpMachineList) {
+async fn start() -> (Core, HttpMachineList, HttpModuleList) {
     let core = Core {
         answer: Arc::new(Mutex::new((StatusCode::OK, String::new()))),
         tokens: Arc::default(),
@@ -53,7 +57,8 @@ async fn start() -> (Core, HttpMachineList) {
     };
     let app = Router::new()
         .route("/oauth/token", post(token))
-        .route("/api/v1/machines", get(machines))
+        .route("/api/v1/machines", get(listing))
+        .route("/api/v1/modules", get(listing))
         .with_state(core.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -68,8 +73,10 @@ async fn start() -> (Core, HttpMachineList) {
         &format!("http://{addr}/"),
         client,
     ));
-    let list = HttpMachineList::new(http, &format!("http://{addr}/api/"), token);
-    (core, list)
+    let base = format!("http://{addr}/api/");
+    let machines = HttpMachineList::new(http.clone(), &base, token.clone());
+    let modules = HttpModuleList::new(http, &base, token);
+    (core, machines, modules)
 }
 
 fn answer(core: &Core, status: StatusCode, body: &str) {
@@ -83,7 +90,7 @@ const LISTED: &str = r#"{"machines": [
 
 #[tokio::test]
 async fn the_listed_machines_are_live_with_one_token() {
-    let (core, list) = start().await;
+    let (core, list, _) = start().await;
     answer(&core, StatusCode::OK, LISTED);
     let live = list.live().await;
     assert_eq!(
@@ -97,7 +104,7 @@ async fn the_listed_machines_are_live_with_one_token() {
 
 #[tokio::test]
 async fn a_refused_token_is_no_answer_and_is_fetched_again() {
-    let (core, list) = start().await;
+    let (core, list, _) = start().await;
     answer(&core, StatusCode::OK, LISTED);
     assert!(list.live().await.is_some());
     // The core no longer takes `t1` (a rotated secret, a restarted provider).
@@ -109,7 +116,7 @@ async fn a_refused_token_is_no_answer_and_is_fetched_again() {
 
 #[tokio::test]
 async fn an_unavailable_core_is_no_answer() {
-    let (core, list) = start().await;
+    let (core, list, _) = start().await;
     answer(
         &core,
         StatusCode::SERVICE_UNAVAILABLE,
@@ -120,7 +127,7 @@ async fn an_unavailable_core_is_no_answer() {
 
 #[tokio::test]
 async fn a_malformed_body_is_no_answer() {
-    let (core, list) = start().await;
+    let (core, list, _) = start().await;
     for body in [
         "not json",
         r#"{"modules": []}"#,
@@ -136,7 +143,7 @@ async fn a_malformed_body_is_no_answer() {
 
 #[tokio::test]
 async fn no_token_from_the_provider_is_no_answer() {
-    let (core, list) = start().await;
+    let (core, list, _) = start().await;
     answer(&core, StatusCode::OK, LISTED);
     *core.token_status.lock().unwrap() = StatusCode::UNAUTHORIZED;
     assert_eq!(list.live().await, None);
@@ -151,4 +158,35 @@ fn the_secret_is_not_in_debug() {
         secret: "very-secret".into(),
     };
     assert!(!format!("{client:?}").contains("very-secret"));
+}
+
+#[tokio::test]
+async fn the_listed_modules_are_installed_with_the_shared_token() {
+    let (core, machines, modules) = start().await;
+    answer(&core, StatusCode::OK, LISTED);
+    assert!(machines.live().await.is_some());
+    answer(
+        &core,
+        StatusCode::OK,
+        r#"{"modules": [{"name": "orchestrator", "version": "0.3.0"},
+        {"name": "engine-trino", "version": "0.2.0"}]}"#,
+    );
+    assert_eq!(
+        modules.installed().await,
+        Some(vec!["orchestrator".into(), "engine-trino".into()])
+    );
+    assert_eq!(core.tokens.load(Ordering::SeqCst), 1, "one token for both");
+}
+
+#[tokio::test]
+async fn a_module_list_that_cannot_be_read_is_no_answer() {
+    let (core, _, modules) = start().await;
+    answer(&core, StatusCode::SERVICE_UNAVAILABLE, "{}");
+    assert_eq!(modules.installed().await, None);
+    answer(&core, StatusCode::OK, LISTED);
+    assert_eq!(modules.installed().await, None, "machines are not modules");
+    core.tokens.fetch_add(1, Ordering::SeqCst);
+    answer(&core, StatusCode::OK, r#"{"modules": []}"#);
+    assert_eq!(modules.installed().await, None, "401: no answer");
+    assert_eq!(modules.installed().await, Some(vec![]));
 }

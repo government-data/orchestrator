@@ -5,8 +5,8 @@
 //! (`<module>-machine`, client credentials) for the audience `core`.
 //!
 //! The server binary builds one [`CoreToken`] and shares it between
-//! [`HttpMachineList`] (set with `EnginePort::with_machines`) and the module
-//! list (set with `Scheduler::with_modules`).
+//! [`HttpMachineList`] (set with `EnginePort::with_machines`) and
+//! [`HttpModuleList`] (set with `Scheduler::with_modules`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +17,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::MachineList;
+use crate::{MachineList, ModuleList};
 
 /// The audience of the core's API for a module's machine client.
 pub const CORE_AUDIENCE: &str = "core";
@@ -135,6 +135,24 @@ pub(crate) async fn get_json(
     res.json().await.ok()
 }
 
+/// The `name` of each item of `body[key]`, an array of objects; `None`
+/// when the body has another shape.
+fn names(body: Value, key: &str, url: &str) -> Option<Vec<String>> {
+    #[derive(Deserialize)]
+    struct Named {
+        name: String,
+    }
+    let items = body
+        .get(key)
+        .cloned()
+        .map(serde_json::from_value::<Vec<Named>>);
+    if let Some(Ok(items)) = items {
+        return Some(items.into_iter().map(|n| n.name).collect());
+    }
+    tracing::warn!("core: {url} answered an unexpected shape");
+    None
+}
+
 /// The core's `GET /v1/machines`: every machine not retired.
 #[derive(Debug, Clone)]
 pub struct HttpMachineList {
@@ -156,26 +174,40 @@ impl HttpMachineList {
     }
 }
 
-#[derive(Deserialize)]
-struct Machines {
-    machines: Vec<Listed>,
+#[async_trait]
+impl MachineList for HttpMachineList {
+    /// `{"machines": [{"name", "role", "state"}]}`: the names.
+    async fn live(&self) -> Option<Vec<String>> {
+        let body = get_json(&self.http, &self.token, &self.url).await?;
+        names(body, "machines", &self.url)
+    }
 }
 
-#[derive(Deserialize)]
-struct Listed {
-    name: String,
+/// The core's `GET /v1/modules`: every installed module.
+#[derive(Debug, Clone)]
+pub struct HttpModuleList {
+    http: reqwest::Client,
+    url: String,
+    token: Arc<CoreToken>,
+}
+
+impl HttpModuleList {
+    /// The core at `base`, as [`HttpMachineList::new`].
+    #[must_use]
+    pub fn new(http: reqwest::Client, base: &str, token: Arc<CoreToken>) -> Self {
+        Self {
+            http,
+            url: format!("{}/v1/modules", base.trim_end_matches('/')),
+            token,
+        }
+    }
 }
 
 #[async_trait]
-impl MachineList for HttpMachineList {
-    async fn live(&self) -> Option<Vec<String>> {
+impl ModuleList for HttpModuleList {
+    /// `{"modules": [{"name", "version"}]}`: the names.
+    async fn installed(&self) -> Option<Vec<String>> {
         let body = get_json(&self.http, &self.token, &self.url).await?;
-        match serde_json::from_value::<Machines>(body) {
-            Ok(m) => Some(m.machines.into_iter().map(|m| m.name).collect()),
-            Err(_) => {
-                tracing::warn!("core: {} answered an unexpected shape", self.url);
-                None
-            }
-        }
+        names(body, "modules", &self.url)
     }
 }
