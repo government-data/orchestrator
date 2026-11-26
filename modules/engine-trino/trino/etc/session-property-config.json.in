@@ -25,7 +25,8 @@
       "query_max_execution_time": "2m",
       "query_max_run_time": "10m",
       "query_max_scan_physical_bytes": "20GB",
-      "spill_enabled": "false"
+      "spill_enabled": "false",
+      "retry_policy": "NONE"
     }
   }
 ]

@@ -33,6 +33,7 @@ query.max-memory=${TRINO_QUERY_CAP}
 spill-enabled=true
 spiller-spill-path=/spill
 spill-compression-codec=LZ4
+retry-policy=${TRINO_RETRY_POLICY}
 PROPS
 cp "$MODULE"/etc/catalog/*.properties /data/trino/catalog/
 

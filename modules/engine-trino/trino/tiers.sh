@@ -5,12 +5,12 @@
 # value can be set in the environment instead (TRINO_HEAP, …).
 # shellcheck shell=bash
 tier() {
-  local heap headroom cap rules bi_n bi_mem bi_share include
+  local heap headroom cap rules bi_n bi_mem bi_share include retry=NONE
   case "${TRINO_TIER:-s}" in
     xs) heap=6G headroom=1800MB cap=3GB rules=1 bi_n=2 bi_mem=600MB bi_share=29% include=true ;;
     s) heap=10G headroom=3GB cap=5GB rules=1 bi_n=4 bi_mem=512MB bi_share=29% include=true ;;
     m) heap=26G headroom=6GB cap=7GB rules=2 bi_n=6 bi_mem=1GB bi_share=30% include=true ;;
-    l) heap=10G headroom=3GB cap=7GB rules=2 bi_n=6 bi_mem=1GB bi_share=30% include=false ;;
+    l) heap=10G headroom=3GB cap=7GB rules=2 bi_n=6 bi_mem=1GB bi_share=30% include=false retry=QUERY ;;
     *) echo "TRINO_TIER: xs, s, m or l, not ${TRINO_TIER}" >&2; return 1 ;;
   esac
   TRINO_HEAP=${TRINO_HEAP:-$heap}
@@ -27,6 +27,9 @@ tier() {
   BI_CPU_HARD=${BI_CPU_HARD:-2h}
   BI_SCAN=${BI_SCAN:-500GB}
   TRINO_INCLUDE_COORDINATOR=${TRINO_INCLUDE_COORDINATOR:-$include}
+  # Tier L repeats a query a lost worker cut (BI does not: its session
+  # sets NONE); one node has nothing to repeat on.
+  TRINO_RETRY_POLICY=${TRINO_RETRY_POLICY:-$retry}
   export TRINO_INCLUDE_COORDINATOR
 }
 
