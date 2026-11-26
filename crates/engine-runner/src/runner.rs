@@ -14,6 +14,10 @@ use tokio::time::Instant;
 
 use crate::{CallError, Engine, Orchestrator, Outcome, RunContext, RunRef, RunnerMetrics};
 
+mod report;
+
+pub use report::FOUND_EVERY;
+
 /// Why a runner claims nothing now (its own guard, decision 0011).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pause {

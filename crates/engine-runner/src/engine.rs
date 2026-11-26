@@ -6,7 +6,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use engine_port::{Claimed, Descriptor, LogLine, LogStream, Progress, MAX_LOG_LINE_BYTES};
+use engine_port::{
+    Claimed, Descriptor, Found, Inventory, LogLine, LogStream, Progress, MAX_LOG_LINE_BYTES,
+};
 use orchestration_model::{FinalState, Interruption};
 use tokio::sync::Notify;
 
@@ -88,6 +90,18 @@ pub trait Engine: Send + Sync + 'static {
     async fn run(&self, run: Claimed, ctx: RunContext) -> Outcome;
     /// Stops a run: `run` then returns soon.
     async fn cancel(&self, run: &RunRef) -> Result<(), EngineError>;
+    /// What is on the cluster that no deploy placed, and the external
+    /// schedules that start it, for import; `None` (the default) for an
+    /// engine without artefacts, which then reports nothing.
+    async fn found(&self) -> Option<Found> {
+        None
+    }
+    /// The records its deploys left beside their artefacts
+    /// (`orchestrator.json`), for re-attach; `None` (the default) for an
+    /// engine without artefacts.
+    async fn inventory(&self) -> Option<Inventory> {
+        None
+    }
 }
 
 #[derive(Debug, Default)]

@@ -1,7 +1,10 @@
 //! The orchestrator, as a runner calls it: the engine port over HTTP.
 
 use async_trait::async_trait;
-use engine_port::{Claim, Claimed, Descriptor, Finish, Logs, Registered, Renew, Renewed};
+use engine_port::{
+    Claim, Claimed, Descriptor, Finish, Found, FoundAnswer, Inventory, InventoryAnswer, Logs,
+    Registered, Renew, Renewed,
+};
 use reqwest::StatusCode;
 
 /// Why a call to the orchestrator failed.
@@ -35,6 +38,10 @@ pub trait Orchestrator: Send + Sync + 'static {
     async fn renew(&self, run: &str, r: &Renew) -> Result<Renewed, CallError>;
     async fn logs(&self, run: &str, l: &Logs) -> Result<(), CallError>;
     async fn finish(&self, run: &str, f: &Finish) -> Result<(), CallError>;
+    /// What the runner found on its cluster; replaces its last report.
+    async fn found(&self, d: &Descriptor, f: &Found) -> Result<FoundAnswer, CallError>;
+    /// The records deploys left on the cluster, at start.
+    async fn inventory(&self, d: &Descriptor, i: &Inventory) -> Result<InventoryAnswer, CallError>;
 }
 
 /// The engine port over HTTP. The client carries the machine's identity
@@ -119,5 +126,15 @@ impl Orchestrator for HttpOrchestrator {
     async fn finish(&self, run: &str, f: &Finish) -> Result<(), CallError> {
         let path = format!("/internal/runs/{run}/finish");
         self.send(reqwest::Method::POST, &path, f).await.map(drop)
+    }
+
+    async fn found(&self, d: &Descriptor, f: &Found) -> Result<FoundAnswer, CallError> {
+        let path = format!("{}/found", engine_path(d));
+        Self::json(self.send(reqwest::Method::PUT, &path, f).await?).await
+    }
+
+    async fn inventory(&self, d: &Descriptor, i: &Inventory) -> Result<InventoryAnswer, CallError> {
+        let path = format!("{}/inventory", engine_path(d));
+        Self::json(self.send(reqwest::Method::PUT, &path, i).await?).await
     }
 }
