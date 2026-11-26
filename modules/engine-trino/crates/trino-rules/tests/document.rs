@@ -173,3 +173,55 @@ fn a_refs_table_is_granted_by_its_exact_name() {
     assert_eq!(rules[0]["table"], "(records[$]refs)");
     assert_eq!(rules[0]["privileges"], json!(["SELECT"]));
 }
+
+#[test]
+fn a_maintenance_user_owns_the_tables_of_its_own_bronze_and_silver() {
+    let g = grants(json!([
+        {"subject": "job_maint_loans", "namespace": "loans_bronze", "tables": ["*"],
+         "privileges": ["SELECT", "INSERT", "DELETE"]},
+        {"subject": "job_maint_loans", "namespace": "loans_silver", "tables": ["*"],
+         "privileges": ["SELECT", "INSERT", "DELETE"]},
+        {"subject": "job_maint_loans", "namespace": "savings_bronze", "tables": ["*"],
+         "privileges": ["SELECT"]},
+        {"subject": "job_maint_loans", "namespace": "lake.loans_bronze", "tables": ["*"],
+         "privileges": ["SELECT"]},
+        {"subject": "job_maint_loans", "namespace": "quality_gold", "tables": ["*"],
+         "privileges": ["SELECT", "DELETE"]},
+        {"subject": "job_maint_gold", "namespace": "quality_gold", "tables": ["*"],
+         "privileges": ["SELECT", "DELETE"]},
+        {"subject": "job_extract_loans", "namespace": "loans_bronze", "tables": ["*"],
+         "privileges": ["SELECT", "INSERT", "DELETE"]}
+    ]));
+    let (doc, invalid) = document(&g, &[]);
+    assert!(invalid.is_empty());
+    let t = tables(&doc);
+    let privileges = |user: &str, catalog: &str, schema: &str| {
+        t.iter()
+            .find(|r| r["user"] == user && r["catalog"] == catalog && r["schema"] == schema)
+            .map(|r| r["privileges"].clone())
+            .unwrap_or_else(|| panic!("no rule for {user} on {catalog}.{schema}"))
+    };
+    let owner = json!(["SELECT", "INSERT", "DELETE", "OWNERSHIP"]);
+    assert_eq!(
+        privileges("job_maint_loans", "lake_maint", "loans_bronze"),
+        owner
+    );
+    assert_eq!(
+        privileges("job_maint_loans", "lake_maint", "loans_silver"),
+        owner
+    );
+    let not_own = [
+        ("job_maint_loans", "lake_maint", "savings_bronze"),
+        ("job_maint_loans", "lake", "loans_bronze"),
+        ("job_maint_loans", "lake_maint", "quality_gold"),
+        ("job_maint_gold", "lake_maint", "quality_gold"),
+        ("job_extract_loans", "lake", "loans_bronze"),
+    ];
+    for (user, catalog, schema) in not_own {
+        let p = privileges(user, catalog, schema);
+        assert!(
+            !p.as_array().unwrap().contains(&json!("OWNERSHIP")),
+            "{user} on {catalog}.{schema}"
+        );
+    }
+}
