@@ -39,7 +39,7 @@ pub fn document(core: &[Grant], modules: &[Grant]) -> (Value, Vec<Invalid>) {
             "privileges": ["SELECT"]}),
     ];
     for g in &jobs {
-        if g.subject.starts_with("job_report_") {
+        if g.subject.starts_with("job_report_") && !g.tables.iter().any(|t| t.contains('$')) {
             let mut snapshots = table_rule(g, None);
             snapshots.insert(
                 "table".into(),
@@ -85,12 +85,13 @@ pub fn document(core: &[Grant], modules: &[Grant]) -> (Value, Vec<Invalid>) {
     (doc, invalid)
 }
 
-/// `a|b` for named tables, `.*` for all.
+/// `a|b` for named tables (a `$` written `[$]`), `.*` for all.
 fn tables_of(g: &Grant) -> String {
     if g.tables.iter().any(|t| t == "*") {
         ".*".into()
     } else {
-        format!("({})", g.tables.join("|"))
+        let names: Vec<String> = g.tables.iter().map(|t| t.replace('$', "[$]")).collect();
+        format!("({})", names.join("|"))
     }
 }
 

@@ -11,11 +11,12 @@
 //! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` (core #192) |
 //! | `POST /internal/jobs/{job}/token` `{"as": "job" \| "report"}` | `{"token": <JWT>}` |
 //! | `GET /internal/jobs/{job}/credentials` | `{"credentials": [{"name", "current", "previous"}]}` |
-//! | `GET /internal/trino/grants` | `{"grants": [<neutral grant>…]}` |
+//! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
 //! The last three are the shapes the user accepted on 2026-11-25 for the
 //! core to build. The provider's keys are its JWKS (`<issuer>/oauth/jwks`).
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use async_trait::async_trait;
@@ -65,6 +66,8 @@ impl std::fmt::Debug for MachineClient {
 
 /// The audience of the core's job routes.
 pub const JOBS_AUDIENCE: &str = "quality-jobs";
+/// The audience of the core's job grants route (ruling of 2026-11-25).
+pub const GRANTS_AUDIENCE: &str = "quality-grants";
 
 /// The core's routes for the job runner and the rules service.
 #[derive(Debug, Clone)]
@@ -74,7 +77,8 @@ pub struct HttpCore {
     issuer: String,
     client: MachineClient,
     /// The machine token and when it is no longer used.
-    token: std::sync::Arc<Mutex<Option<(String, tokio::time::Instant)>>>,
+    /// The machine tokens by audience, each until it is no longer used.
+    tokens: std::sync::Arc<Mutex<BTreeMap<&'static str, (String, tokio::time::Instant)>>>,
 }
 
 fn failed(what: &str, e: reqwest::Error) -> CoreError {
@@ -91,15 +95,15 @@ impl HttpCore {
             base: base.trim_end_matches('/').to_string(),
             issuer: issuer.trim_end_matches('/').to_string(),
             client,
-            token: std::sync::Arc::default(),
+            tokens: std::sync::Arc::default(),
         }
     }
 
-    /// A machine token for the job routes, kept until a minute before it
+    /// A machine token for `audience`, kept until a minute before it
     /// expires.
-    async fn machine_token(&self) -> Result<String, CoreError> {
-        let mut held = self.token.lock().await;
-        if let Some((t, until)) = held.as_ref() {
+    async fn machine_token(&self, audience: &'static str) -> Result<String, CoreError> {
+        let mut held = self.tokens.lock().await;
+        if let Some((t, until)) = held.get(audience) {
             if tokio::time::Instant::now() < *until {
                 return Ok(t.clone());
             }
@@ -108,10 +112,7 @@ impl HttpCore {
             .http
             .post(format!("{}/oauth/token", self.issuer))
             .basic_auth(&self.client.id, Some(&self.client.secret))
-            .form(&[
-                ("grant_type", "client_credentials"),
-                ("audience", JOBS_AUDIENCE),
-            ])
+            .form(&[("grant_type", "client_credentials"), ("audience", audience)])
             .send()
             .await
             .map_err(|e| failed("token", e))?;
@@ -129,18 +130,27 @@ impl HttpCore {
             .saturating_sub(60)
             .max(10);
         let until = tokio::time::Instant::now() + std::time::Duration::from_secs(secs);
-        *held = Some((token.clone(), until));
+        held.insert(audience, (token.clone(), until));
         Ok(token)
     }
 
     async fn get(&self, path: &str, body: Option<Value>) -> Result<Value, CoreError> {
+        self.call(JOBS_AUDIENCE, path, body).await
+    }
+
+    async fn call(
+        &self,
+        audience: &'static str,
+        path: &str,
+        body: Option<Value>,
+    ) -> Result<Value, CoreError> {
         let url = format!("{}{path}", self.base);
         let req = match body {
             Some(b) => self.http.post(url).json(&b),
             None => self.http.get(url),
         };
         let res = req
-            .bearer_auth(self.machine_token().await?)
+            .bearer_auth(self.machine_token(audience).await?)
             .send()
             .await
             .map_err(|e| failed(path, e))?;
@@ -150,9 +160,11 @@ impl HttpCore {
         res.json().await.map_err(|e| failed(path, e))
     }
 
-    /// The core's neutral grants for people and job users.
+    /// The core's neutral grants for the job users.
     pub async fn grants(&self) -> Result<Vec<trino_rules::Grant>, CoreError> {
-        let v = self.get("/internal/trino/grants", None).await?;
+        let v = self
+            .call(GRANTS_AUDIENCE, "/internal/quality/v1/job-grants", None)
+            .await?;
         serde_json::from_value(v["grants"].clone()).map_err(|_| CoreError("grants: shape".into()))
     }
 }

@@ -199,9 +199,6 @@ fn broken_declarations_refuse_the_bundle_at_load() {
         common::write("w", "INSERT w"),
         delete("d", "DELETE a", "w")
     ]));
-    let on_insert = bundle(json!([count("c", "SELECT c"),
-        {"id": "w", "sql": "INSERT", "expects": {"kind": "count", "update_types": ["INSERT"]},
-         "only_if_rows": {"after": "c"}}]));
     let undeclared = bundle(json!([common::write("w", "INSERT {{x}}")]));
     let from_later = with_placeholders(
         json!([common::write("w", "INSERT {{silver_snapshot}}"), pin()]),
@@ -215,7 +212,6 @@ fn broken_declarations_refuse_the_bundle_at_load() {
     for (what, p) in [
         ("later", later),
         ("not a count", not_count),
-        ("not a delete", on_insert),
         ("undeclared", undeclared),
         ("from a later statement", from_later),
         ("text", text),

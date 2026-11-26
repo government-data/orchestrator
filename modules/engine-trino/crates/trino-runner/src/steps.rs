@@ -1,7 +1,7 @@
 //! The two step forms of core decision 0090's amendment A1, and the run's
 //! state between steps:
 //!
-//! - `only_if_rows {after}` on a `DELETE`: it runs only if the earlier
+//! - `only_if_rows {after}` on any statement: it runs only if the earlier
 //!   one-row `bigint` count it names was not 0, else it is skipped;
 //! - `{{name}}` placeholders, declared with a type and a source column of
 //!   an earlier one-row answer, filled with that value's decimal digits.
@@ -28,10 +28,6 @@ fn is_count(e: &Expects) -> bool {
 
 fn one_row_with(e: &Expects, column: &str) -> bool {
     matches!(e, Expects::Rows { columns, max_rows: 1 } if columns.iter().any(|c| c.0 == column))
-}
-
-fn is_delete(e: &Expects) -> bool {
-    matches!(e, Expects::Count { update_types } if update_types.iter().any(|t| t == "DELETE"))
 }
 
 /// The `{{…}}` tokens of `sql`, in order; `None` if a `{{` is not closed.
@@ -76,7 +72,7 @@ pub(crate) fn check(bundle: &Bundle) -> Result<(), &'static str> {
         if let Some(o) = &st.only_if_rows {
             let after = index.get(o.after.as_str()).ok_or("unknown count")?;
             let earlier_count = *after < i && is_count(&bundle.statements[*after].expects);
-            if !earlier_count || !is_delete(&st.expects) {
+            if !earlier_count {
                 return Err("bad only_if_rows");
             }
         }
