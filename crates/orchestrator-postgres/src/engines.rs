@@ -16,6 +16,8 @@ pub struct RegisteredEngine {
     pub port: u32,
     pub kinds: Vec<RunKind>,
     pub registered_at: DateTime<Utc>,
+    /// The engine module whose machine client registered it last, if known.
+    pub module: Option<String>,
 }
 
 /// How many runners of an engine and line were seen since an instant.
@@ -100,7 +102,7 @@ impl PgStore {
     /// Every engine and line registered.
     pub async fn engines(&self) -> Result<Vec<RegisteredEngine>, StoreError> {
         let rows = sqlx::query(
-            "SELECT engine, line, engine_version, port, kinds, registered_at
+            "SELECT engine, line, engine_version, port, kinds, registered_at, module
                FROM engines ORDER BY engine, line",
         )
         .fetch_all(&self.pool)
@@ -116,6 +118,7 @@ impl PgStore {
                         .map_err(|_| corrupt("port"))?,
                     kinds,
                     registered_at: r.try_get("registered_at")?,
+                    module: r.try_get("module")?,
                 })
             })
             .collect()

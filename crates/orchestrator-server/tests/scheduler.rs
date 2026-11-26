@@ -121,3 +121,41 @@ async fn a_window_that_skips_runs_nothing_on_its_cluster() {
     assert_eq!((tick.queued, tick.skipped), (0, 1));
     assert_eq!(queued(&h).await, 0);
 }
+
+/// A fake core: the modules it lists, or no answer.
+struct FakeCore(std::sync::Mutex<Option<Vec<String>>>);
+
+#[async_trait::async_trait]
+impl orchestrator_server::ModuleList for FakeCore {
+    async fn installed(&self) -> Option<Vec<String>> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+#[tokio::test]
+async fn a_line_the_core_stops_listing_does_not_fire() {
+    let h = harness().await;
+    h.register().await;
+    let flow = h.flow("daily").await;
+    h.store.create_schedule(&hourly(&flow.id)).await.unwrap();
+    let core = std::sync::Arc::new(FakeCore(std::sync::Mutex::new(Some(vec!["other".into()]))));
+    let scheduler = Scheduler::new(h.store.clone(), h.clock.clone()).with_modules(core.clone());
+    h.clock.advance(Duration::seconds(5));
+    assert_eq!(
+        scheduler.tick().await.unwrap().queued,
+        0,
+        "engine-fake not listed"
+    );
+    *core.0.lock().unwrap() = None;
+    assert_eq!(
+        scheduler.tick().await.unwrap().queued,
+        0,
+        "no answer: the last list holds"
+    );
+    *core.0.lock().unwrap() = Some(vec!["engine-fake".into()]);
+    assert_eq!(
+        scheduler.tick().await.unwrap().queued,
+        1,
+        "listed again: it fires"
+    );
+}

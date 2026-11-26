@@ -5,6 +5,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
+
 use chrono::{DateTime, Duration, Utc};
 use orchestration_model::{
     blocked, fires_to_run, merge_parameters, open_windows, retry, EngineLine, Trigger,
@@ -12,7 +14,7 @@ use orchestration_model::{
 use orchestrator_postgres::{NewRun, PgStore, Schedule, StoreError};
 use schedule::Calendar;
 
-use crate::{Clock, Metrics};
+use crate::{installed_lines, Clock, Metrics, ModuleList};
 
 /// Runners on engine port 1 stop a run they can no longer renew before its
 /// lease ends, so a lost run's engine is known to have stopped.
@@ -32,19 +34,44 @@ pub struct Tick {
 }
 
 /// The scheduler, on a store and a clock.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Scheduler<C> {
     store: PgStore,
     clock: C,
     metrics: Option<Arc<Metrics>>,
+    modules: Option<Arc<dyn ModuleList>>,
+    last_listed: Arc<Mutex<Option<HashSet<String>>>>,
 }
 
 impl<C: Clock> Scheduler<C> {
+    /// Reads which modules are installed from the core (decision 0015).
+    #[must_use]
+    pub fn with_modules(mut self, modules: Arc<dyn ModuleList>) -> Self {
+        self.modules = Some(modules);
+        self
+    }
+
+    /// The core's last list of installed modules: read now, or kept from
+    /// the last answer when the core does not answer.
+    async fn listed(&self) -> Option<HashSet<String>> {
+        let modules = self.modules.as_ref()?;
+        let fresh = modules.installed().await.map(|m| m.into_iter().collect());
+        let mut last = self.last_listed.lock().await;
+        if fresh.is_some() {
+            *last = fresh;
+        } else {
+            tracing::warn!("the core's installed modules were not read: the last list is kept");
+        }
+        last.clone()
+    }
+
     pub fn new(store: PgStore, clock: C) -> Self {
         Self {
             store,
             clock,
             metrics: None,
+            modules: None,
+            last_listed: Arc::default(),
         }
     }
 
@@ -85,13 +112,9 @@ impl<C: Clock> Scheduler<C> {
 
     async fn fire(&self, now: DateTime<Utc>, tick: &mut Tick) -> Result<(), StoreError> {
         let settings = self.store.settings().await?;
-        let installed: HashSet<EngineLine> = self
-            .store
-            .engines()
-            .await?
-            .into_iter()
-            .map(|e| e.engine)
-            .collect();
+        let engines = self.store.engines().await?;
+        let listed = self.listed().await;
+        let installed: HashSet<EngineLine> = installed_lines(&engines, listed.as_ref());
         let paused: HashSet<_> = self.store.paused_engines().await?.into_iter().collect();
         let windows = self.store.maintenance_windows().await?;
         let open = open_windows(&windows, &Calendar, now);
@@ -162,4 +185,10 @@ fn run_for(
 
 fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
+}
+
+impl<C> std::fmt::Debug for Scheduler<C> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Scheduler").finish_non_exhaustive()
+    }
 }
