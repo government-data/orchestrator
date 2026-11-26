@@ -3,6 +3,7 @@
 //! module's own, created by the agent at `module add` (quality-sdk decision
 //! 0009); its migrations only add.
 
+mod deploys;
 mod engines;
 mod flows;
 mod found;
@@ -15,6 +16,7 @@ mod store;
 mod variables;
 mod windows;
 
+pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
 pub use reaper::Cancelled;
