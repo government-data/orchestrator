@@ -1,0 +1,146 @@
+# The engine-trino module's compose, run by quality-sdk's update agent as
+# the project `engine-trino` on the master server (decision 0011):
+#
+#   docker compose --project-name engine-trino \
+#     --project-directory /opt/quality-data/engine-trino/current \
+#     --file /opt/quality-data/engine-trino/current/compose.yml \
+#     --env-file /opt/quality-data/engine-trino/.env up -d --no-build --wait
+#
+# Every image comes from the signed index, by digest: IMAGE_TRINO is Trino
+# 484 mirrored into this module's ECR repository (trinodb/trino:484@sha256:
+# 2704eb53935af5e582d63d6033e9bf99d20c325e9b0e30b1016ef59a4773979f, the
+# same digest query-trino mirrors), IMAGE_PROXY the Traefik mirrored beside
+# it, IMAGE_ENGINE_TRINO this module's own image (Dockerfile).
+#
+# - `coordinator`: Trino's coordinator (trino/), HTTPS on TRINO_PORT with
+#   the master's machine certificate, for the workers and the consumers.
+# - `lake-proxy`: in the coordinator's network namespace, the loopback way
+#   to the lake's gate with the machine's certificate (proxy/).
+# - `rules`: Trino's rules, merged from the core's grants (trino-rules).
+# - `runner`: the job runners (trino-job-runner); scale with --scale.
+#
+# Required environment (the module's .env): QD_MACHINE_DIR (the master's
+# machine certificate: ca.crt, machine.pem), QD_SECRETS_DIR, QD_OIDC_ISSUER,
+# TRINO_NODE_NAME (the master's machine name, as in its certificate),
+# CORE_URL (the core's internal entry point with /api), ORCHESTRATOR_URL,
+# QD_LAKE_GATE (<lake machine>:<port>), QD_LAKE_NAME, TRINO_LAKE_WAREHOUSE,
+# QD_OIDC_MACHINE_CLIENT_ID (the module's machine client; its secret is
+# the agent's oidc-machine-secret file).
+# Optional: TRINO_TIER (s), TRINO_PORT (8490), TRINO_WORKERS, RUNNER_CONCURRENCY (1).
+name: engine-trino
+
+networks:
+  engine: {}
+
+volumes:
+  coordinator-data: {}
+  spill: {}
+
+secrets:
+  trino-shared-secret:
+    file: ${QD_SECRETS_DIR:?}/trino-shared-secret
+  lake-access-key:
+    file: ${QD_SECRETS_DIR:?}/lake-access-key
+  lake-secret-key:
+    file: ${QD_SECRETS_DIR:?}/lake-secret-key
+  oidc-machine-secret:
+    file: ${QD_SECRETS_DIR:?}/oidc-machine-secret
+
+services:
+  coordinator:
+    image: ${IMAGE_TRINO:?set IMAGE_TRINO to the image by digest}
+    restart: unless-stopped
+    user: "1000:1000"
+    entrypoint: ["/etc/trino-module/entrypoint.sh"]
+    networks: [engine]
+    ports: ["${TRINO_PORT:-8490}:8490"]
+    stop_grace_period: 2m
+    secrets: [trino-shared-secret, lake-access-key, lake-secret-key]
+    environment:
+      TRINO_TIER: ${TRINO_TIER:-s}
+      TRINO_NODE_ID: coordinator
+      TRINO_NODE_NAME: ${TRINO_NODE_NAME:?}
+      TRINO_DISCOVERY_URI: https://${TRINO_NODE_NAME:?}:${TRINO_PORT:-8490}
+      TRINO_JWT_ISSUER: ${QD_OIDC_ISSUER:?}
+      TRINO_JWKS_URL: ${QD_OIDC_ISSUER:?}/oauth/jwks
+      TRINO_RULES_URL: http://rules:8070/rules.json
+      TRINO_LAKE_S3_URL: http://127.0.0.1:9000
+      TRINO_LAKE_WAREHOUSE: ${TRINO_LAKE_WAREHOUSE:?}
+    extra_hosts: ["${TRINO_NODE_NAME:?}:127.0.0.1"]
+    volumes:
+      - ./trino:/etc/trino-module:ro
+      - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
+      - coordinator-data:/data/trino
+      - spill:/spill
+    healthcheck:
+      # Trino's own health-check reads /etc/trino; this etc is rendered.
+      test: ["CMD", "bash", "-c", "[[ $$(curl -fsS http://127.0.0.1:8090/v1/info) == *'\"starting\":false'* ]]"]
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 12
+
+  lake-proxy:
+    image: ${IMAGE_PROXY:?set IMAGE_PROXY to the image by digest}
+    restart: unless-stopped
+    user: "1000:1000"
+    network_mode: "service:coordinator"
+    command:
+      - --entryPoints.lake.address=127.0.0.1:9000
+      - --providers.file.filename=/etc/qd/proxy/dynamic.yml
+      - --providers.file.watch=true
+      - --ping=true
+      - --ping.entryPoint=lake
+      - --log.format=json
+    environment:
+      QD_LAKE_GATE: ${QD_LAKE_GATE:?}
+      QD_LAKE_NAME: ${QD_LAKE_NAME:?}
+    volumes:
+      - ./proxy:/etc/qd/proxy:ro
+      - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--ping.entryPoint=lake", "--entryPoints.lake.address=127.0.0.1:9000"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  rules:
+    image: ${IMAGE_ENGINE_TRINO:?set IMAGE_ENGINE_TRINO to the image by digest}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["/usr/local/bin/trino-rules"]
+    networks: [engine]
+    secrets: [oidc-machine-secret]
+    environment:
+      CORE_URL: ${CORE_URL:?}
+      QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
+      QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
+      RULES_LISTEN: 0.0.0.0:8070
+    volumes:
+      - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
+
+  runner:
+    image: ${IMAGE_ENGINE_TRINO:?set IMAGE_ENGINE_TRINO to the image by digest}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["/usr/local/bin/trino-job-runner"]
+    networks: [engine]
+    stop_grace_period: 2m
+    secrets: [oidc-machine-secret]
+    environment:
+      ORCHESTRATOR_URL: ${ORCHESTRATOR_URL:?}
+      CORE_URL: ${CORE_URL:?}
+      QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
+      QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
+      TRINO_URL: https://${TRINO_NODE_NAME:?}:8490
+      TRINO_VERSION: "484"
+      RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-1}
+    extra_hosts: ["${TRINO_NODE_NAME:?}:host-gateway"]
+    volumes:
+      - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
