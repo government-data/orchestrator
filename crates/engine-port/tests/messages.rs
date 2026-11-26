@@ -54,6 +54,7 @@ fn every_message_round_trips() {
             engine_ref: Some("ref-0".into()),
             last_detail: None,
         }),
+        variables: BTreeMap::from([("region".into(), json!("north"))]),
     });
     round_trip(&Renew {
         lease: "lease-1".into(),

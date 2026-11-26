@@ -164,6 +164,7 @@ impl Orchestrator for FakeOrchestrator {
                 lease,
                 lease_until: until(),
                 resume: run.resume.clone(),
+                variables: Default::default(),
             })
         }))
     }

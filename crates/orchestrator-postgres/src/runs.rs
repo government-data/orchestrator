@@ -132,6 +132,7 @@ impl PgStore {
             lease: c.lease.to_string(),
             lease_until: c.lease_until,
             resume,
+            variables: Default::default(),
         }))
     }
 

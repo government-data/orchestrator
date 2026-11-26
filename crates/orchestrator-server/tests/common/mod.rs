@@ -98,6 +98,15 @@ pub fn descriptor() -> Descriptor {
 }
 
 impl Harness {
+    /// Serves the port again, opening sealed variables with `sealer`.
+    pub fn with_sealer(&mut self, sealer: Arc<orchestrator_server::Sealer>) {
+        let state = PortState {
+            port: EnginePort::new(self.store.clone(), self.clock.clone()).with_sealer(sealer),
+            auth: Arc::new(HeaderMachine),
+        };
+        self.app = router(Arc::new(state));
+    }
+
     /// Serves the port again, counting in `metrics`.
     pub fn with_metrics(&mut self, metrics: Arc<orchestrator_server::Metrics>) {
         let state = PortState {

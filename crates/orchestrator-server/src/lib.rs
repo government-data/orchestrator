@@ -10,6 +10,7 @@ mod modules;
 mod port;
 mod removal;
 mod scheduler;
+mod sealer;
 mod token;
 
 pub use clock::{Clock, FixedClock, SystemClock};
@@ -20,6 +21,7 @@ pub use modules::{installed_lines, ModuleList};
 pub use port::{runner_of, EnginePort, Machine, PortError};
 pub use removal::{removal, RemovalAnswer, ORCHESTRATOR_MODULE};
 pub use scheduler::{Scheduler, Tick, RUNNERS_FENCE};
+pub use sealer::{NotOpened, Sealer};
 pub use token::{ed25519_keys, module_of, Expected, InternalCaller, JwksKeys, KeyList, Keys};
 
 /// Installs the JSON technical logs on stdout (the core's `logging`): run

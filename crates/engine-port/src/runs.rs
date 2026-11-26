@@ -58,6 +58,10 @@ pub struct Claimed {
     pub lease_until: DateTime<Utc>,
     /// With `continue`, where the run it repeats was.
     pub resume: Option<Resume>,
+    /// The flow's variables, secret ones opened: for the engine only,
+    /// never logged or reported back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub variables: BTreeMap<String, Value>,
 }
 
 /// How far a run is.

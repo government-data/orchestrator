@@ -91,6 +91,11 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "variables": {
+          "additionalProperties": true,
+          "description": "The flow's variables, secret ones opened: for the engine only,\nnever logged or reported back.",
+          "type": "object"
         }
       },
       "required": [
