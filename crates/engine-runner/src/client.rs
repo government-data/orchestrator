@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Found, FoundAnswer, Inventory, InventoryAnswer, Logs,
-    Registered, Renew, Renewed,
+    Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, Found, FoundAnswer, Inventory,
+    InventoryAnswer, Logs, Registered, Renew, Renewed,
 };
 use reqwest::StatusCode;
 
@@ -11,6 +11,7 @@ use reqwest::StatusCode;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallError {
     /// The lease is not the run's any more: stop the run, report nothing.
+    /// For a deploy: it is not this machine's, or it ended otherwise.
     Lease,
     /// The orchestrator refused the call (and why).
     Refused(u16, String),
@@ -42,6 +43,15 @@ pub trait Orchestrator: Send + Sync + 'static {
     async fn found(&self, d: &Descriptor, f: &Found) -> Result<FoundAnswer, CallError>;
     /// The records deploys left on the cluster, at start.
     async fn inventory(&self, d: &Descriptor, i: &Inventory) -> Result<InventoryAnswer, CallError>;
+    /// A deploy of the runner's engine and line on its cluster, or none:
+    /// the one this runner claimed and did not finish first.
+    async fn claim_deploy(
+        &self,
+        d: &Descriptor,
+        c: &Claim,
+    ) -> Result<Option<DeployClaimed>, CallError>;
+    /// A deploy's end; the same end again changes nothing.
+    async fn finish_deploy(&self, deploy: &str, f: &DeployFinish) -> Result<(), CallError>;
 }
 
 /// The engine port over HTTP. The client carries the machine's identity
@@ -136,5 +146,23 @@ impl Orchestrator for HttpOrchestrator {
     async fn inventory(&self, d: &Descriptor, i: &Inventory) -> Result<InventoryAnswer, CallError> {
         let path = format!("{}/inventory", engine_path(d));
         Self::json(self.send(reqwest::Method::PUT, &path, i).await?).await
+    }
+
+    async fn claim_deploy(
+        &self,
+        d: &Descriptor,
+        c: &Claim,
+    ) -> Result<Option<DeployClaimed>, CallError> {
+        let path = format!("{}/deploys/claim", engine_path(d));
+        let res = self.send(reqwest::Method::POST, &path, c).await?;
+        if res.status() == StatusCode::NO_CONTENT {
+            return Ok(None);
+        }
+        Self::json(res).await.map(Some)
+    }
+
+    async fn finish_deploy(&self, deploy: &str, f: &DeployFinish) -> Result<(), CallError> {
+        let path = format!("/internal/deploys/{deploy}/finish");
+        self.send(reqwest::Method::POST, &path, f).await.map(drop)
     }
 }

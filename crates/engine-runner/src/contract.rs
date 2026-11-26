@@ -11,15 +11,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use engine_port::{Claimed, Descriptor, LogStream, RunKind, PORT};
+use engine_port::{
+    Claim, Claimed, DeployFinish, DeployState, Descriptor, LogStream, RunKind, PORT,
+};
 use orchestration_model::{EngineName, Line};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 
-pub use fake::{FakeOrchestrator, FakeRun};
+pub use fake::{FakeDeploy, FakeOrchestrator, FakeRun};
 
 use crate::{
-    Ended, Engine, EngineError, NoGuard, Orchestrator, Outcome, Refused, RunContext, RunRef, Runner,
+    CallError, Ended, Engine, EngineError, NoGuard, Orchestrator, Outcome, Refused, RunContext,
+    RunRef, Runner,
 };
 
 /// The orchestrator's side of a case.
@@ -31,6 +34,11 @@ pub trait Seed: Send + Sync {
     async fn cancel(&self, run: &str);
     /// A run's state as stored (`succeeded`, `failed`, …).
     async fn state(&self, run: &str) -> String;
+    /// Queues an import deploy for the fake engine on the runner's cluster;
+    /// its id.
+    async fn queue_deploy(&self) -> String;
+    /// A deploy's state as stored (`queued`, `claimed`, `succeeded`, …).
+    async fn deploy_state(&self, deploy: &str) -> String;
 }
 
 /// An engine that does what a run's `behave` parameter says: `succeed`,
@@ -112,6 +120,7 @@ pub async fn run_suite<O: Orchestrator>(orchestrator: O, seed: &dyn Seed) {
         .await
         .expect("the descriptor is registered");
     assert_eq!(registered.port, PORT);
+    deploy_case(runner.orchestrator(), seed).await;
 
     let run = seed.queue(json!({"behave": "succeed"})).await;
     let ended = claim_until(&runner).await.await.expect("the run task ends");
@@ -146,4 +155,53 @@ pub async fn run_suite<O: Orchestrator>(orchestrator: O, seed: &dyn Seed) {
         "cancelled",
         "a run cancelled by a person"
     );
+}
+
+/// A deploy claimed, taken up again by the same runner, and finished once.
+async fn deploy_case<O: Orchestrator>(orchestrator: &O, seed: &dyn Seed) {
+    let d = FakeEngine::default().descriptor();
+    let claim = Claim {
+        runner: "contract".into(),
+    };
+    let id = seed.queue_deploy().await;
+    let claimed = orchestrator
+        .claim_deploy(&d, &claim)
+        .await
+        .expect("a deploy claim is answered")
+        .expect("the deploy is handed out");
+    assert_eq!(claimed.deploy, id);
+    let again = orchestrator.claim_deploy(&d, &claim).await.unwrap();
+    assert_eq!(
+        again.map(|a| a.deploy).as_deref(),
+        Some(id.as_str()),
+        "the same runner takes its deploy up again"
+    );
+    assert_eq!(seed.deploy_state(&id).await, "claimed");
+    let end = DeployFinish {
+        state: DeployState::Succeeded,
+        path: Some("/srv/managed/contract".into()),
+        version: Some("v-1".into()),
+        sha256: Some(claimed.source_sha256.clone()),
+        external_disabled: false,
+    };
+    orchestrator
+        .finish_deploy(&id, &end)
+        .await
+        .expect("a deploy finishes");
+    orchestrator
+        .finish_deploy(&id, &end)
+        .await
+        .expect("the same finish again changes nothing");
+    let other = DeployFinish {
+        external_disabled: true,
+        ..end
+    };
+    assert_eq!(
+        orchestrator.finish_deploy(&id, &other).await,
+        Err(CallError::Lease),
+        "another finish after it"
+    );
+    assert_eq!(seed.deploy_state(&id).await, "succeeded");
+    let next = orchestrator.claim_deploy(&d, &claim).await.unwrap();
+    assert!(next.is_none(), "a finished deploy is not handed out again");
 }

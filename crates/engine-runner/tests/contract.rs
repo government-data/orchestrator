@@ -9,7 +9,7 @@ use chrono::Utc;
 use engine_runner::contract::{run_suite, Seed, FAKE_ENGINE};
 use engine_runner::HttpOrchestrator;
 use orchestration_model::{EngineLine, EngineName, Line, OnInterrupt, Trigger};
-use orchestrator_postgres::{NewFlow, NewRun, PgStore};
+use orchestrator_postgres::{NewDeploy, NewFlow, NewRun, PgStore};
 use orchestrator_server::{router, Authenticate, EnginePort, Machine, PortState, SystemClock};
 use serde_json::{json, Value};
 use sqlx::PgPool;
@@ -69,6 +69,22 @@ impl Seed for StoreSeed {
             .fetch_one(self.store.pool())
             .await
             .unwrap()
+    }
+
+    async fn queue_deploy(&self) -> String {
+        let new = NewDeploy {
+            flow_id: self.flow.clone(),
+            cluster: "machine-1".into(),
+            source_path: "/srv/found/contract".into(),
+            source_sha256: "ab".repeat(32),
+            schedules: Vec::new(),
+            queued_at: Utc::now(),
+        };
+        self.store.create_deploy(&new).await.unwrap()
+    }
+
+    async fn deploy_state(&self, deploy: &str) -> String {
+        self.store.deploy(deploy).await.unwrap().unwrap().state
     }
 }
 
