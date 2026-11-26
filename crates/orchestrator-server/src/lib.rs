@@ -3,6 +3,7 @@
 //! runners pull their runs from. It never names an engine.
 
 mod clock;
+mod core_api;
 mod deploys;
 mod found;
 mod http;
@@ -19,6 +20,7 @@ mod sealer;
 mod token;
 
 pub use clock::{Clock, FixedClock, SystemClock};
+pub use core_api::{CoreToken, HttpMachineList, MachineClient, CORE_AUDIENCE};
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use machines::MachineList;
