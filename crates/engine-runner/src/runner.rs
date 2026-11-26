@@ -1,14 +1,17 @@
 //! The claim loop: register, claim while a slot is free and the runner's
 //! own guard allows it, and drive each run: renew its lease, pass a cancel
 //! to the engine, stop it when the lease is lost (so it never runs twice),
-//! stop it past its timeout or on a low disk, and report its end.
+//! stop it past its timeout or on a low disk, and report its end; a scan
+//! asked at a renewal wakes the found report.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use engine_port::{Claim, Claimed, Descriptor, Finish, Logs, Registered, Renew, RenewAction};
+use engine_port::{
+    Claim, Claimed, Descriptor, Finish, Logs, Registered, Renew, RenewAction, Renewed,
+};
 use orchestration_model::{FinalState, Interruption};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
@@ -16,7 +19,7 @@ use crate::{CallError, Engine, Orchestrator, Outcome, RunContext, RunRef, Runner
 
 mod report;
 
-pub use report::FOUND_EVERY;
+pub use report::{FoundDue, FOUND_EVERY};
 
 /// Why a runner claims nothing now (its own guard, decision 0011).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +70,9 @@ pub struct Runner<E, O, G> {
     slots: Arc<Semaphore>,
     renew_every: Duration,
     metrics: Option<Arc<RunnerMetrics>>,
+    /// A scan asked at a renewal and not reported yet: asked twice before
+    /// the report, it is one scan.
+    scan: Arc<Notify>,
 }
 
 impl<E, O, G> std::fmt::Debug for Runner<E, O, G> {
@@ -91,6 +97,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
             slots,
             renew_every: Duration::from_secs(u64::from(engine_port::RENEW_EVERY_SECS)),
             metrics: None,
+            scan: Arc::new(Notify::new()),
         }
     }
 
@@ -147,6 +154,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
             orchestrator: Arc::clone(&self.orchestrator),
             guard: Arc::clone(&self.guard),
             renew_every: self.renew_every,
+            scan: Arc::clone(&self.scan),
         };
         let metrics = self.metrics.clone();
         let slots = Arc::clone(&self.slots);
@@ -171,6 +179,7 @@ struct Drive<E, O, G> {
     orchestrator: Arc<O>,
     guard: Arc<G>,
     renew_every: Duration,
+    scan: Arc<Notify>,
 }
 
 /// Why the runner stopped the engine itself.
@@ -226,10 +235,13 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
                 self.stop(&run, &ctx).await;
             }
             let renewal = self.renew(&run, &ctx).await;
-            if renewal.is_ok() {
+            if let Ok(r) = &renewal {
                 renewed_at = Instant::now();
+                if r.scan {
+                    self.scan.notify_one();
+                }
             }
-            match renewal {
+            match renewal.map(|r| r.action) {
                 Ok(RenewAction::Cancel) if stopped.is_none() => {
                     stopped = Some(Stop::Cancel);
                     self.stop(&run, &ctx).await;
@@ -244,7 +256,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
         }
     }
 
-    async fn renew(&self, run: &Claimed, ctx: &RunContext) -> Result<RenewAction, CallError> {
+    async fn renew(&self, run: &Claimed, ctx: &RunContext) -> Result<Renewed, CallError> {
         self.flush_logs(run, ctx).await?;
         let (progress, engine_ref) = ctx.with_state(|s| {
             s.ref_changed = false;
@@ -255,7 +267,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
             progress,
             engine_ref,
         };
-        Ok(self.orchestrator.renew(&run.run, &r).await?.action)
+        self.orchestrator.renew(&run.run, &r).await
     }
 
     async fn flush_logs(&self, run: &Claimed, ctx: &RunContext) -> Result<(), CallError> {
