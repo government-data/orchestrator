@@ -1751,6 +1751,7 @@ dependencies = [
  "reqwest",
  "ring",
  "schedule",
+ "serde",
  "serde_json",
  "sqlx",
  "testcontainers",

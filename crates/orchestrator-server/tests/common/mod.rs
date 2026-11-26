@@ -34,6 +34,11 @@ impl Authenticate for HeaderMachine {
         let name = headers.get("x-test-machine")?.to_str().ok()?;
         Some(Machine(name.to_string()))
     }
+
+    async fn module(&self, headers: &HeaderMap) -> Option<String> {
+        let name = headers.get("x-test-module")?.to_str().ok()?;
+        Some(name.to_string())
+    }
 }
 
 pub struct Harness {
@@ -116,7 +121,9 @@ impl Harness {
             .uri(path)
             .header("content-type", "application/json");
         if let Some(m) = machine {
-            req = req.header("x-test-machine", m);
+            req = req
+                .header("x-test-machine", m)
+                .header("x-test-module", "engine-fake");
         }
         let req = req.body(Body::from(body.to_string())).unwrap();
         let res = self.app.clone().oneshot(req).await.unwrap();
