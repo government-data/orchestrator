@@ -77,8 +77,8 @@ fn answer(core: &Core, status: StatusCode, body: &str) {
 }
 
 const LISTED: &str = r#"{"machines": [
-    {"name": "knime-1", "role": "worker", "state": "approved"},
-    {"name": "knime-2", "role": "worker", "state": "draining"},
+    {"name": "worker-1", "role": "worker", "state": "approved"},
+    {"name": "worker-2", "role": "worker", "state": "draining"},
     {"name": "lake-a", "role": "lake", "state": "pending"}]}"#;
 
 #[tokio::test]
@@ -88,7 +88,7 @@ async fn the_listed_machines_are_live_with_one_token() {
     let live = list.live().await;
     assert_eq!(
         live,
-        Some(vec!["knime-1".into(), "knime-2".into(), "lake-a".into()])
+        Some(vec!["worker-1".into(), "worker-2".into(), "lake-a".into()])
     );
     answer(&core, StatusCode::OK, r#"{"machines": []}"#);
     assert_eq!(list.live().await, Some(vec![]));
@@ -125,7 +125,7 @@ async fn a_malformed_body_is_no_answer() {
         "not json",
         r#"{"modules": []}"#,
         r#"{"machines": [{"role": "worker"}]}"#,
-        r#"{"machines": "knime-1"}"#,
+        r#"{"machines": "worker-1"}"#,
     ] {
         answer(&core, StatusCode::OK, body);
         assert_eq!(list.live().await, None, "{body}");
