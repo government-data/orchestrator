@@ -8,10 +8,12 @@ mod bundle;
 mod check;
 mod engine;
 mod ports;
+mod run;
+mod steps;
 
 pub use bundle::{
-    bundle_kid, digest_hex, Bundle, BundleRefused, Expects, Keys, RunAs, SignedBundle, Statement,
-    BUNDLE_TYP,
+    bundle_kid, digest_hex, Bundle, BundleRefused, Expects, Keys, OnlyIfRows, Placeholder,
+    PlaceholderType, RunAs, SignedBundle, Source, Statement, BUNDLE_TYP,
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};

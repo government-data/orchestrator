@@ -4,20 +4,20 @@
 //! order, each with the job's token, checking each answer before the next
 //! (core decision 0090, points 2, 6.2 and 7.3).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use engine_port::{Claimed, Descriptor, LogStream, RunKind, PORT};
+use engine_port::{Claimed, Descriptor, RunKind, PORT};
 use engine_runner::{Engine, EngineError, Outcome, Refused, RunContext, RunRef};
 use orchestration_model::{EngineName, Interruption, Line};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 
 use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, RunAs, SignedBundle};
-use crate::check::{class, fits};
 use crate::ports::{Core, JobRequest, Trino};
+use crate::steps::Known;
 
 /// The job kinds of core decision 0090 (point 2).
 pub const KINDS: [&str; 12] = [
@@ -40,8 +40,8 @@ const KILL_WAIT: Duration = Duration::from_secs(60);
 
 /// The engine of engine-trino's job runner.
 pub struct TrinoEngine<C, T> {
-    core: C,
-    trino: T,
+    pub(crate) core: C,
+    pub(crate) trino: T,
     /// The provider's keys, fetched again for a `kid` they lack.
     keys: Mutex<Keys>,
     version: String,
@@ -59,20 +59,7 @@ impl<C, T> std::fmt::Debug for TrinoEngine<C, T> {
     }
 }
 
-/// The progress detail after `n` statements are done: what a repeated
-/// attempt resumes from.
-fn done(n: usize) -> String {
-    format!("done:{n}")
-}
-
-fn parse_done(detail: Option<&str>) -> usize {
-    detail
-        .and_then(|d| d.strip_prefix("done:"))
-        .and_then(|n| n.parse().ok())
-        .unwrap_or(0)
-}
-
-fn transient(c: &str) -> Outcome {
+pub(crate) fn transient(c: &str) -> Outcome {
     Outcome {
         interruption: Some(Interruption::System),
         ..Outcome::failed(c)
@@ -202,122 +189,11 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         if let Err(o) = self.end_previous(run, &token).await {
             return o;
         }
-        let from = parse_done(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
+        let (from, known) =
+            Known::parse(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
         tokio::select! {
-            o = self.statements(&job, &bundle, from, &token, ctx) => o,
+            o = self.statements(&job, &bundle, (from, known), &token, ctx) => o,
             () = cancel.notified() => Outcome::cancelled(),
-        }
-    }
-
-    async fn statements(
-        &self,
-        job: &str,
-        bundle: &Bundle,
-        from: usize,
-        token: &str,
-        ctx: &RunContext,
-    ) -> Outcome {
-        let total = bundle.statements.len();
-        let mut written = 0u64;
-        let mut report_token = None;
-        for (i, st) in bundle.statements.iter().enumerate().skip(from) {
-            let token = match st.run_as {
-                RunAs::Job => token.to_string(),
-                RunAs::Report => match &report_token {
-                    Some(t) => Clone::clone(t),
-                    None => match self.core.token(job, RunAs::Report).await {
-                        Ok(t) => report_token.insert(t).clone(),
-                        Err(_) => return transient("core_unavailable"),
-                    },
-                },
-            };
-            ctx.log(LogStream::System, &format!("statement {} started", st.id));
-            let started = |id: &str| ctx.engine_ref(id);
-            let answer = match self.run_one(job, st, &token, &started).await {
-                Ok(a) => a,
-                Err(kind) => {
-                    let c = class(&kind);
-                    ctx.log(
-                        LogStream::System,
-                        &format!("statement {} failed: {}", st.id, c.class),
-                    );
-                    return if c.transient {
-                        transient(c.class)
-                    } else {
-                        Outcome::failed(c.class)
-                    };
-                }
-            };
-            let Some(n) = fits(&answer, &st.expects) else {
-                ctx.log(
-                    LogStream::System,
-                    &format!("statement {} answered another shape", st.id),
-                );
-                return Outcome::failed("unexpected_answer");
-            };
-            written += n;
-            #[allow(clippy::cast_precision_loss)]
-            let fraction = (i + 1) as f64 / total as f64;
-            ctx.progress(Some(fraction), Some(&done(i + 1)));
-            // Sends "statement i done" with the renewal now, not in 30 s.
-            if let Some(id) = &answer.query_id {
-                ctx.engine_ref(id);
-            }
-        }
-        Outcome {
-            counts: BTreeMap::from([
-                ("statements".into(), (total - from) as u64),
-                ("rows_written".into(), written),
-            ]),
-            ..Outcome::succeeded()
-        }
-    }
-
-    /// One statement; a source's statement is tried once more with the
-    /// previous secrets if it failed for good with the current ones.
-    async fn run_one(
-        &self,
-        job: &str,
-        st: &crate::bundle::Statement,
-        token: &str,
-        started: &(dyn for<'q> Fn(&'q str) + Send + Sync),
-    ) -> Result<crate::check::Answer, String> {
-        if !st.reads_source {
-            return self
-                .trino
-                .run(token, &st.sql, &[], started)
-                .await
-                .map_err(|f| f.kind);
-        }
-        let creds = self
-            .core
-            .credentials(job)
-            .await
-            .map_err(|_| "unavailable".to_string())?;
-        let current: Vec<(String, String)> = creds
-            .iter()
-            .map(|c| (c.name.clone(), c.current.clone()))
-            .collect();
-        match self.trino.run(token, &st.sql, &current, started).await {
-            Ok(a) => Ok(a),
-            Err(f) if class(&f.kind).transient || creds.iter().all(|c| c.previous.is_none()) => {
-                Err(f.kind)
-            }
-            Err(_) => {
-                let previous: Vec<(String, String)> = creds
-                    .iter()
-                    .map(|c| {
-                        (
-                            c.name.clone(),
-                            c.previous.clone().unwrap_or_else(|| c.current.clone()),
-                        )
-                    })
-                    .collect();
-                self.trino
-                    .run(token, &st.sql, &previous, started)
-                    .await
-                    .map_err(|f| f.kind)
-            }
         }
     }
 }
