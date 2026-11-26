@@ -3,6 +3,7 @@
 //! module's own, created by the agent at `module add` (quality-sdk decision
 //! 0009); its migrations only add.
 
+mod adoption;
 mod deploys;
 mod engines;
 mod flows;
@@ -16,6 +17,7 @@ mod store;
 mod variables;
 mod windows;
 
+pub use adoption::Adoption;
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
