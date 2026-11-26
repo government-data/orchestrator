@@ -12,7 +12,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use engine_port::{Claim, Descriptor, Finish, Found, Hold, Logs, Release, Renew};
+use engine_port::{Claim, DeployFinish, Descriptor, Finish, Found, Hold, Logs, Release, Renew};
 use orchestration_model::{EngineLine, EngineName, Line};
 use serde_json::json;
 
@@ -96,7 +96,9 @@ impl IntoResponse for ApiError {
         };
         match &*port {
             PortError::Refused(r) => error(StatusCode::UNPROCESSABLE_ENTITY, &r.to_string()),
-            PortError::Lease => error(StatusCode::CONFLICT, &port.to_string()),
+            PortError::Lease | PortError::NotTheirs => {
+                error(StatusCode::CONFLICT, &port.to_string())
+            }
             PortError::UnknownEngine => error(StatusCode::NOT_FOUND, &port.to_string()),
             PortError::Store(e) => {
                 tracing::error!(error = %e, "engine port: the store failed");
@@ -123,6 +125,10 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
     Router::new()
         .route("/internal/engines/{engine}/{line}", put(register::<C>))
         .route("/internal/engines/{engine}/{line}/claim", post(claim::<C>))
+        .route(
+            "/internal/engines/{engine}/{line}/deploys/claim",
+            post(claim_deploy::<C>),
+        )
         .route("/internal/engines/{engine}/{line}/found", put(found::<C>))
         .route("/internal/engines/{engine}/hold", post(hold::<C>))
         .route("/internal/engines/{engine}/release", post(release::<C>))
@@ -130,6 +136,7 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
         .route("/internal/runs/{id}/renew", post(renew::<C>))
         .route("/internal/runs/{id}/logs", post(logs::<C>))
         .route("/internal/runs/{id}/finish", post(finish::<C>))
+        .route("/internal/deploys/{id}/finish", post(finish_deploy::<C>))
         .with_state(state)
 }
 
@@ -155,6 +162,29 @@ async fn claim<C: Clock>(
         Some(run) => Ok(Json(run).into_response()),
         None => Ok(StatusCode::NO_CONTENT.into_response()),
     }
+}
+
+async fn claim_deploy<C: Clock>(
+    State(s): Shared<C>,
+    Caller(m, _): Caller,
+    Path((engine, line)): Path<(String, String)>,
+    Json(c): Json<Claim>,
+) -> Result<Response, ApiError> {
+    let e = engine_line(&engine, &line)?;
+    match s.port.claim_deploy(&m, &e, &c).await? {
+        Some(deploy) => Ok(Json(deploy).into_response()),
+        None => Ok(StatusCode::NO_CONTENT.into_response()),
+    }
+}
+
+async fn finish_deploy<C: Clock>(
+    State(s): Shared<C>,
+    Caller(m, _): Caller,
+    Path(id): Path<String>,
+    Json(f): Json<DeployFinish>,
+) -> Result<StatusCode, ApiError> {
+    s.port.finish_deploy(&m, &id, &f).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn found<C: Clock>(

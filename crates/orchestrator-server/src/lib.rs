@@ -3,6 +3,7 @@
 //! runners pull their runs from. It never names an engine.
 
 mod clock;
+mod deploys;
 mod found;
 mod http;
 mod identity;
