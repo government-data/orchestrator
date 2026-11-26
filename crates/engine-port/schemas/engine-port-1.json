@@ -210,6 +210,207 @@
       "title": "Claimed",
       "type": "object"
     },
+    "DeployClaimed": {
+      "$defs": {
+        "FolderRecord": {
+          "additionalProperties": false,
+          "description": "A folder, as a record names it: found again by id, else by name, else\ncreated with that id.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
+        "ScheduleSource": {
+          "description": "Where an external schedule is, so that the runner can disable it.",
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "A cron line: its file and its line number (from 1).",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "cron",
+                  "type": "string"
+                },
+                "line": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "file",
+                "line"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "A systemd timer, by its unit name.",
+              "properties": {
+                "kind": {
+                  "const": "timer",
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "unit"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A deploy handed to a runner of its engine and line, on the cluster its\nartefact is on. Claiming again before its finish hands the same deploy\nto the same runner, so a runner that restarts takes it up again.",
+      "properties": {
+        "allow_overlap": {
+          "default": false,
+          "type": "boolean"
+        },
+        "deploy": {
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "description": "The rest of the flow's settings, for `orchestrator.json`.",
+          "type": "string"
+        },
+        "flow": {
+          "type": "string"
+        },
+        "folder": {
+          "$ref": "#/$defs/FolderRecord",
+          "description": "The flow's folder and name, the managed layout's."
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "on_interrupt": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "default": {},
+          "type": "object"
+        },
+        "schedules": {
+          "default": [],
+          "description": "The external schedules that start it, disabled by the runner once\nthe flow is ready.",
+          "items": {
+            "$ref": "#/$defs/ScheduleSource"
+          },
+          "type": "array"
+        },
+        "source_path": {
+          "description": "The artefact's absolute path on the cluster now.",
+          "type": "string"
+        },
+        "source_sha256": {
+          "description": "Its SHA-256 as the runner found it: a different artefact there now\nis not deployed.",
+          "type": "string"
+        },
+        "timeout_secs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deploy",
+        "flow",
+        "source_path",
+        "source_sha256",
+        "folder",
+        "name",
+        "kind",
+        "timeout_secs"
+      ],
+      "title": "DeployClaimed",
+      "type": "object"
+    },
+    "DeployFinish": {
+      "$defs": {
+        "DeployState": {
+          "description": "How a deploy ended.",
+          "oneOf": [
+            {
+              "const": "succeeded",
+              "description": "The artefact is in the managed layout, tagged and recorded.",
+              "type": "string"
+            },
+            {
+              "const": "failed",
+              "description": "It was not placed: the artefact stays where it was.",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "`POST /internal/deploys/{id}/finish`: a deploy's end. Sending the same\nfinish again changes nothing; another one after it is refused.",
+      "properties": {
+        "external_disabled": {
+          "description": "Every external schedule that starts it was disabled: if not, the\nflow's schedules are created paused.",
+          "type": "boolean"
+        },
+        "path": {
+          "description": "Where the artefact is now (absolute), on success.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sha256": {
+          "description": "The SHA-256 of what was placed (lowercase hex), on success.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/DeployState"
+        },
+        "version": {
+          "description": "The version tag the deploy gave it, on success.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "external_disabled"
+      ],
+      "title": "DeployFinish",
+      "type": "object"
+    },
     "Descriptor": {
       "$defs": {
         "RunKind": {
