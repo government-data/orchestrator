@@ -76,7 +76,7 @@ pub fn runner_of(machine: &Machine, engine: &EngineLine) -> String {
 /// The engine port, on a store and a clock.
 #[derive(Debug, Clone)]
 pub struct EnginePort<C> {
-    store: PgStore,
+    pub(crate) store: PgStore,
     clock: C,
     metrics: Option<Arc<Metrics>>,
     sealer: Option<Arc<Sealer>>,
