@@ -14,7 +14,12 @@ use orchestration_model::{open_windows, EngineLine, EngineName};
 use orchestrator_postgres::{ClaimFor, PgStore, StoreError};
 use schedule::Calendar;
 
-use crate::{Clock, Metrics};
+use std::collections::BTreeMap;
+
+use orchestrator_postgres::VariableValue;
+use serde_json::Value;
+
+use crate::{Clock, Metrics, Sealer};
 
 /// Who calls the engine port: a machine of the installation, as its
 /// certificate names it.
@@ -74,6 +79,7 @@ pub struct EnginePort<C> {
     store: PgStore,
     clock: C,
     metrics: Option<Arc<Metrics>>,
+    sealer: Option<Arc<Sealer>>,
 }
 
 impl<C: Clock> EnginePort<C> {
@@ -82,7 +88,16 @@ impl<C: Clock> EnginePort<C> {
             store,
             clock,
             metrics: None,
+            sealer: None,
         }
+    }
+
+    /// Opens sealed variables and secrets with `sealer` when it hands a run
+    /// out.
+    #[must_use]
+    pub fn with_sealer(mut self, sealer: Arc<Sealer>) -> Self {
+        self.sealer = Some(sealer);
+        self
     }
 
     /// Counts the runs that end in `metrics`.
@@ -146,7 +161,54 @@ impl<C: Clock> EnginePort<C> {
             lease_until: now + Duration::seconds(i64::from(LEASE_SECS)),
             now,
         };
-        Ok(self.store.claim(&c).await?)
+        let Some(mut claimed) = self.store.claim(&c).await? else {
+            return Ok(None);
+        };
+        match self.variables(&claimed.flow).await? {
+            Some(variables) => {
+                claimed.variables = variables;
+                Ok(Some(claimed))
+            }
+            None => {
+                // A secret it needs does not open: the run fails at once,
+                // and no runner ever sees part of its variables.
+                tracing::warn!(run = %claimed.run, "a flow variable did not open");
+                let failed = Finish {
+                    lease: claimed.lease.clone(),
+                    state: orchestration_model::FinalState::Failed,
+                    counts: Default::default(),
+                    error_class: Some("secret_unavailable".into()),
+                    interruption: None,
+                };
+                self.store.finish(&claimed.run, &failed, now).await?;
+                Ok(None)
+            }
+        }
+    }
+
+    /// A flow's variables, sealed ones and secrets opened; `None` when one
+    /// does not open (no key, another key, a secret deleted).
+    async fn variables(&self, flow: &str) -> Result<Option<BTreeMap<String, Value>>, PortError> {
+        let mut out = BTreeMap::new();
+        for v in self.store.variables(flow).await? {
+            let sealed = match v.value {
+                VariableValue::Plain(value) => {
+                    out.insert(v.name, value);
+                    continue;
+                }
+                VariableValue::Sealed(bytes) => Some(bytes),
+                VariableValue::Secret(id) => self.store.sealed_secret(&id).await?,
+            };
+            let opened = sealed.and_then(|bytes| {
+                let plain = self.sealer.as_ref()?.open(&bytes).ok()?;
+                serde_json::from_slice::<Value>(&plain)
+                    .ok()
+                    .or_else(|| String::from_utf8(plain).ok().map(Value::String))
+            });
+            let Some(value) = opened else { return Ok(None) };
+            out.insert(v.name, value);
+        }
+        Ok(Some(out))
     }
 
     /// Extends a run's lease: `cancel` when someone cancelled it, `held`
