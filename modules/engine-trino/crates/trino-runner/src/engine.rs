@@ -17,6 +17,7 @@ use tokio::sync::Notify;
 
 use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, SignedBundle};
 use crate::ports::{Core, JobRequest, Trino, TrinoUser};
+use crate::report::Trail;
 use crate::steps::Known;
 
 /// The job kinds of core decision 0090 (point 2), with `prepare` (ruling
@@ -59,6 +60,8 @@ pub struct TrinoEngine<C, T> {
     version: String,
     concurrency: u32,
     kill_poll: Duration,
+    /// How long a report's first retry waits.
+    pub(crate) report_wait: Duration,
     /// Per running run: the job's token and its cancel signal.
     running: Mutex<HashMap<String, (String, Arc<Notify>)>>,
 }
@@ -88,14 +91,16 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             version: version.to_string(),
             concurrency,
             kill_poll: Duration::from_secs(1),
+            report_wait: crate::report::REPORT_WAIT,
             running: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Polls a killed query faster (tests).
+    /// Polls a killed query and retries a report faster (tests).
     #[must_use]
     pub fn polling_every(mut self, every: Duration) -> Self {
         self.kill_poll = every;
+        self.report_wait = every;
         self
     }
 
@@ -204,9 +209,14 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         }
         let (from, known) =
             Known::parse(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
-        tokio::select! {
-            o = self.statements(&job, &bundle, (from, known), &token, ctx) => o,
-            () = cancel.notified() => Outcome::cancelled(),
+        let mut trail = Trail::default();
+        let outcome = tokio::select! {
+            o = self.statements(&job, &bundle, (from, known), &token, ctx, &mut trail) => o,
+            () = cancel.notified() => return Outcome::cancelled(),
+        };
+        match trail.report(&signed.digest, &outcome) {
+            Some(report) => self.deliver(&job, &report, outcome, ctx).await,
+            None => outcome,
         }
     }
 }
