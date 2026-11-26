@@ -8,6 +8,7 @@ mod bundle;
 mod check;
 mod engine;
 mod ports;
+mod report;
 mod run;
 mod steps;
 
@@ -17,4 +18,7 @@ pub use bundle::{
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};
-pub use ports::{Core, CoreError, Credential, JobRequest, Trino, TrinoFailure, TrinoUser};
+pub use ports::{
+    Core, CoreError, Credential, Delivery, JobRequest, Trino, TrinoFailure, TrinoUser,
+};
+pub use report::{ReportState, RunReport, SnapshotFilled, StatementReport, StatementState};

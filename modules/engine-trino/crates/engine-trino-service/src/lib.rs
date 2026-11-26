@@ -11,6 +11,7 @@
 //! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, source?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` |
 //! | `POST /internal/quality/v1/runs/{run}/trino-token` `{"user": "rules" \| "report" \| "maint" \| "extract" \| "source"}` | `{"access_token": <JWT>, "expires_in"}` |
 //! | `POST /internal/quality/v1/runs/{run}/source-secrets` | `{"current": {<name>: <value>}, "previous": {…} \| null}` |
+//! | `POST /internal/quality/v1/runs/{run}/report` `{digest, state, statements, snapshots, error_class?}` | `204`; `409 already_reported` when kept before |
 //! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
 //! The provider's keys are its JWKS (`<issuer>/oauth/jwks`).
@@ -24,8 +25,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use trino_client::TrinoClient;
 use trino_runner::{
-    Answer, Core, CoreError, Credential, JobRequest, Keys, SignedBundle, Trino, TrinoFailure,
-    TrinoUser,
+    Answer, Core, CoreError, Credential, Delivery, JobRequest, Keys, RunReport, SignedBundle,
+    Trino, TrinoFailure, TrinoUser,
 };
 
 pub mod guard;
@@ -160,6 +161,40 @@ impl HttpCore {
         res.json().await.map_err(|e| failed(path, e))
     }
 
+    /// Posts a run's report: kept (now or before), refused for good (a
+    /// 4xx but 408 and 429, by the core's error name), or not answered.
+    async fn post_report(&self, path: &str, report: &RunReport) -> Result<Delivery, CoreError> {
+        let res = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .bearer_auth(self.machine_token(JOBS_AUDIENCE).await?)
+            .json(report)
+            .send()
+            .await
+            .map_err(|e| failed(path, e))?;
+        let status = res.status();
+        if status.is_success() {
+            return Ok(Delivery::Kept);
+        }
+        let retried = status.is_server_error() || matches!(status.as_u16(), 408 | 429);
+        if retried || !status.is_client_error() {
+            return Err(CoreError(format!("{path}: HTTP {}", status.as_u16())));
+        }
+        let error = res
+            .json::<Value>()
+            .await
+            .ok()
+            .and_then(|v| v["error"].as_str().map(str::to_string))
+            // A name only: nothing else of the core's answer reaches a log.
+            .filter(|e| e.len() <= 64 && e.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
+            .unwrap_or_else(|| format!("http_{}", status.as_u16()));
+        Ok(if error == "already_reported" {
+            Delivery::Kept
+        } else {
+            Delivery::Refused(error)
+        })
+    }
+
     /// The core's neutral grants for the job users.
     pub async fn grants(&self) -> Result<Vec<trino_rules::Grant>, CoreError> {
         let v = self
@@ -231,6 +266,10 @@ impl Core for HttpCore {
             .as_str()
             .map(str::to_string)
             .ok_or_else(|| CoreError("token: shape".into()))
+    }
+
+    async fn report(&self, job: &str, report: &RunReport) -> Result<Delivery, CoreError> {
+        self.post_report(&run_path(job, "report")?, report).await
     }
 
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError> {

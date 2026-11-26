@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use crate::bundle::{Keys, SignedBundle};
 use crate::check::Answer;
+use crate::report::RunReport;
 
 /// The core could not answer (a class, never a body).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +85,15 @@ impl TrinoUser {
     }
 }
 
+/// What the core did with a run's report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Delivery {
+    /// Kept now, or kept already by an earlier send.
+    Kept,
+    /// Refused for good (its error, as the core names it).
+    Refused(String),
+}
+
 /// The core, over mTLS with the runner's machine identity.
 #[async_trait]
 pub trait Core: Send + Sync + 'static {
@@ -96,6 +106,9 @@ pub trait Core: Send + Sync + 'static {
     async fn token(&self, job: &str, user: TrinoUser) -> Result<String, CoreError>;
     /// The secrets of the source the job reads (none for most kinds).
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError>;
+    /// The run's report (ruling 75); an error is a core that did not
+    /// answer, and the report is sent again.
+    async fn report(&self, job: &str, report: &RunReport) -> Result<Delivery, CoreError>;
 }
 
 /// Why Trino gave no answer: its error's kind (`trino_client::TrinoError::

@@ -11,8 +11,8 @@ use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 use trino_runner::{
-    digest_hex, Answer, Core, CoreError, Credential, JobRequest, Keys, SignedBundle, Trino,
-    TrinoFailure, TrinoUser, BUNDLE_TYP,
+    digest_hex, Answer, Core, CoreError, Credential, Delivery, JobRequest, Keys, RunReport,
+    SignedBundle, Trino, TrinoFailure, TrinoUser, BUNDLE_TYP,
 };
 
 pub const JOB: &str = "00000000-0000-4000-8000-00000000000a";
@@ -86,6 +86,10 @@ pub struct FakeCore {
     /// The digest it answers instead of the bundle's own (a broken pin).
     pub digest: Option<String>,
     pub asked: Arc<Mutex<Vec<(String, JobRequest)>>>,
+    /// Each report sent, with its run.
+    pub reports: Arc<Mutex<Vec<(String, RunReport)>>>,
+    /// What it answers each report in turn (`Kept` once these run out).
+    pub answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
 }
 
 impl std::fmt::Debug for FakeCore {
@@ -102,6 +106,8 @@ impl FakeCore {
             credentials,
             digest: None,
             asked: Arc::default(),
+            reports: Arc::default(),
+            answers: Arc::default(),
         }
     }
 }
@@ -129,6 +135,18 @@ impl Core for FakeCore {
     }
     async fn credentials(&self, _: &str) -> Result<Vec<Credential>, CoreError> {
         Ok(self.credentials.clone())
+    }
+    async fn report(&self, run: &str, report: &RunReport) -> Result<Delivery, CoreError> {
+        self.reports
+            .lock()
+            .unwrap()
+            .push((run.into(), report.clone()));
+        let mut answers = self.answers.lock().unwrap();
+        if answers.is_empty() {
+            Ok(Delivery::Kept)
+        } else {
+            answers.remove(0)
+        }
     }
 }
 

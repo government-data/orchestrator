@@ -7,10 +7,11 @@ use engine_port::LogStream;
 use engine_runner::{Outcome, RunContext};
 use serde_json::Value;
 
-use crate::bundle::{Bundle, PlaceholderType, RunAs};
-use crate::check::{class, fits};
+use crate::bundle::{Bundle, PlaceholderType, RunAs, Statement};
+use crate::check::{class, fits, Answer};
 use crate::engine::{transient, TrinoEngine};
 use crate::ports::{Core, Trino, TrinoUser};
+use crate::report::{StatementState, Trail};
 use crate::steps::{checked, column, fill, Known};
 
 impl<C: Core, T: Trino> TrinoEngine<C, T> {
@@ -21,26 +22,29 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         (from, mut known): (usize, Known),
         token: &str,
         ctx: &RunContext,
+        trail: &mut Trail,
     ) -> Outcome {
         let total = bundle.statements.len();
         let (mut written, mut skipped) = (0u64, 0u64);
         let mut report_token = None;
+        // Done by an earlier attempt: their rows are not read again.
+        for st in bundle.statements.iter().take(from) {
+            trail.push(&st.id, StatementState::Done);
+        }
         for (i, st) in bundle.statements.iter().enumerate().skip(from) {
             if let Some(o) = &st.only_if_rows {
                 match known.0.get(&format!("c.{}", o.after)).map(String::as_str) {
                     Some("0") => {
                         ctx.log(LogStream::System, &format!("statement {} skipped", st.id));
+                        trail.push(&st.id, StatementState::Skipped);
                         skipped += 1;
                         ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
                         continue;
                     }
                     Some(_) => {}
-                    None => return Outcome::failed("step_value_missing"),
+                    None => return failed(trail, st, Outcome::failed("step_value_missing")),
                 }
             }
-            let Some(sql) = fill(&st.sql, &known) else {
-                return Outcome::failed("step_value_missing");
-            };
             let token = match st.run_as {
                 RunAs::Job => token.to_string(),
                 RunAs::Report => match &report_token {
@@ -51,40 +55,29 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                     },
                 },
             };
-            ctx.log(LogStream::System, &format!("statement {} started", st.id));
-            let started = |id: &str| ctx.engine_ref(id);
-            let answer = match self.run_one(job, st, &sql, &token, &started).await {
+            let answer = match self.step(job, st, &known, &token, ctx).await {
                 Ok(a) => a,
-                Err(kind) => {
-                    let c = class(&kind);
-                    ctx.log(
-                        LogStream::System,
-                        &format!("statement {} failed: {}", st.id, c.class),
-                    );
-                    return if c.transient {
-                        transient(c.class)
-                    } else {
-                        Outcome::failed(c.class)
-                    };
-                }
+                Err(o) => return failed(trail, st, o),
             };
             let Some(n) = fits(&answer, &st.expects) else {
                 ctx.log(
                     LogStream::System,
                     &format!("statement {} answered another shape", st.id),
                 );
-                return Outcome::failed("unexpected_answer");
+                return failed(trail, st, Outcome::failed("unexpected_answer"));
             };
             written += n;
             if let Err(o) = learn(bundle, st, &answer, &mut known) {
-                return o;
+                return failed(trail, st, o);
             }
+            trail.done(&st.id, &st.expects, &answer.rows);
             ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
             // Sends "statement i done" with the renewal now, not in 30 s.
             if let Some(id) = &answer.query_id {
                 ctx.engine_ref(id);
             }
         }
+        trail.filled(bundle, &known);
         let mut counts = BTreeMap::from([
             ("statements".into(), (total - from) as u64 - skipped),
             ("statements_skipped".into(), skipped),
@@ -106,16 +99,46 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         }
     }
 
+    /// One statement filled and run, its failure classed.
+    async fn step(
+        &self,
+        job: &str,
+        st: &Statement,
+        known: &Known,
+        token: &str,
+        ctx: &RunContext,
+    ) -> Result<Answer, Outcome> {
+        let Some(sql) = fill(&st.sql, known) else {
+            return Err(Outcome::failed("step_value_missing"));
+        };
+        ctx.log(LogStream::System, &format!("statement {} started", st.id));
+        let started = |id: &str| ctx.engine_ref(id);
+        self.run_one(job, st, &sql, token, &started)
+            .await
+            .map_err(|kind| {
+                let c = class(&kind);
+                ctx.log(
+                    LogStream::System,
+                    &format!("statement {} failed: {}", st.id, c.class),
+                );
+                if c.transient {
+                    transient(c.class)
+                } else {
+                    Outcome::failed(c.class)
+                }
+            })
+    }
+
     /// One statement; a source's statement is tried once more with the
     /// previous secrets if it failed for good with the current ones.
     async fn run_one(
         &self,
         job: &str,
-        st: &crate::bundle::Statement,
+        st: &Statement,
         sql: &str,
         token: &str,
         started: &(dyn for<'q> Fn(&'q str) + Send + Sync),
-    ) -> Result<crate::check::Answer, String> {
+    ) -> Result<Answer, String> {
         if !st.reads_source {
             return self
                 .trino
@@ -156,6 +179,15 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
     }
 }
 
+/// The job's end at `st`: a failure for good marks it failed in the
+/// report; one cut by the system is not reported.
+fn failed(trail: &mut Trail, st: &Statement, o: Outcome) -> Outcome {
+    if o.interruption.is_none() {
+        trail.push(&st.id, StatementState::Failed);
+    }
+    o
+}
+
 #[allow(clippy::cast_precision_loss)]
 fn fraction(done: usize, total: usize) -> f64 {
     done as f64 / total as f64
@@ -165,8 +197,8 @@ fn fraction(done: usize, total: usize) -> f64 {
 /// waits on, and the placeholders it is the source of, checked by type.
 fn learn(
     bundle: &Bundle,
-    st: &crate::bundle::Statement,
-    answer: &crate::check::Answer,
+    st: &Statement,
+    answer: &Answer,
     known: &mut Known,
 ) -> Result<(), Outcome> {
     let counted = bundle
