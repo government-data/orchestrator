@@ -15,7 +15,7 @@ use engine_runner::contract::{run_suite, FakeOrchestrator, Seed};
 use engine_runner::{Ended, Engine, NoGuard, Runner};
 use orchestration_model::RunState;
 use serde_json::{json, Value};
-use trino_runner::{parameters, Credential, TrinoEngine};
+use trino_runner::{parameters, Credential, TrinoEngine, TrinoUser};
 
 type Tested = Runner<TrinoEngine<FakeCore, FakeTrino>, FakeOrchestrator, NoGuard>;
 
@@ -240,5 +240,87 @@ fn the_descriptor_is_trino_with_one_line_and_the_jobs_kinds() {
         ),
         ("trino", "-", "484")
     );
-    assert_eq!(d.kinds.len(), 12);
+    assert_eq!(d.kinds.len(), 15);
+    for kind in ["prepare", "rule_test", "backfill", "tables"] {
+        assert!(d.kinds.iter().any(|k| k.name == kind), "{kind}");
+    }
+}
+
+#[test]
+fn each_kind_compiled_for_trino_has_its_job_user() {
+    let users: Vec<_> = [
+        "evaluate",
+        "backfill",
+        "rule_test",
+        "retract",
+        "slas",
+        "prepare",
+        "extract",
+        "tables",
+        "map",
+    ]
+    .iter()
+    .map(|k| TrinoUser::of_kind(k).map(TrinoUser::as_str))
+    .collect();
+    let rules = Some("rules");
+    assert_eq!(
+        users,
+        [
+            rules,
+            rules,
+            rules,
+            rules,
+            rules,
+            Some("maint"),
+            Some("extract"),
+            Some("source"),
+            None
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_prepare_runs_as_its_maintenance_user() {
+    let mut payload = bundle(json!([{"id": "bronze", "sql": "CREATE TABLE b",
+        "expects": {"kind": "done"}}]));
+    payload["kind"] = json!("prepare");
+    let (runner, fake, trino) = setup(&payload, vec![]);
+    trino.on("CREATE TABLE b", vec![Script::Read(vec![], json!([]))]);
+    let run = fake.queue_run("prepare", json!({"dataset": "loans"}));
+    drive(&runner).await;
+    assert_eq!(fake.run(&run).unwrap().state, RunState::Succeeded);
+    assert_eq!(trino.seen.lock().unwrap().runs[0].1, "maint-token");
+}
+
+#[tokio::test]
+async fn a_tables_listing_asks_the_core_for_its_source() {
+    let mut payload = bundle(
+        json!([{"id": "listing", "sql": "SELECT l", "reads_source": true,
+        "expects": {"kind": "rows", "columns": [["table_name", "varchar"]], "max_rows": 10}}]),
+    );
+    payload["kind"] = json!("tables");
+    let core = FakeCore::new(payload, vec![]);
+    let asked = core.asked.clone();
+    let (runner, fake, trino) = setup_with(core);
+    trino.on(
+        "SELECT l",
+        vec![Script::Read(vec![("table_name", "varchar")], json!(["t"]))],
+    );
+    let run = fake.queue_run("tables", json!({"source": "crm"}));
+    drive(&runner).await;
+    assert_eq!(fake.run(&run).unwrap().state, RunState::Succeeded);
+    assert_eq!(asked.lock().unwrap()[0].1.source.as_deref(), Some("crm"));
+    assert_eq!(trino.seen.lock().unwrap().runs[0].1, "source-token");
+}
+
+#[tokio::test]
+async fn a_kind_without_a_trino_user_runs_nothing() {
+    let mut payload = bundle(json!([write("a", "INSERT a")]));
+    payload["kind"] = json!("map");
+    let (runner, fake, trino) = setup(&payload, vec![]);
+    let run = fake.queue_run("map", params());
+    drive(&runner).await;
+    let r = fake.run(&run).unwrap();
+    assert_eq!(r.error_class.as_deref(), Some("kind_not_on_trino"));
+    assert!(trino.seen.lock().unwrap().runs.is_empty());
 }

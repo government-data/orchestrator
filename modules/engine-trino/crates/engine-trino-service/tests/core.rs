@@ -5,7 +5,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use engine_trino_service::{HttpCore, MachineClient};
 use serde_json::{json, Value};
-use trino_runner::{Core, JobRequest, RunAs};
+use trino_runner::{Core, JobRequest, TrinoUser};
 
 const JOB: &str = "00000000-0000-4000-8000-00000000000a";
 
@@ -16,7 +16,8 @@ async fn core() -> HttpCore {
             post(|Json(b): Json<Value>| async move {
                 assert_eq!(
                     b,
-                    json!({"kind": "evaluate", "dataset": "loans", "cut": null, "attempt": 2})
+                    json!({"kind": "tables", "dataset": null, "cut": null, "attempt": 2,
+                        "source": "crm"})
                 );
                 Json(json!({"job_id": "run-1", "digest": "ab", "bundle": "h.p.s"}))
             }),
@@ -41,18 +42,19 @@ async fn core() -> HttpCore {
             }),
         )
         .route(
-            "/api/internal/jobs/{job}/token",
+            "/api/internal/quality/v1/runs/{run}/trino-token",
             post(|Json(b): Json<Value>| async move {
-                Json(json!({"token": format!("t-{}", b["as"].as_str().unwrap())}))
+                Json(
+                    json!({"access_token": format!("t-{}", b["user"].as_str().unwrap()),
+                    "expires_in": 900}),
+                )
             }),
         )
         .route(
-            "/api/internal/jobs/{job}/credentials",
-            get(|| async {
-                Json(
-                    json!({"credentials": [{"name": "src_crm_password", "current": "c",
-                    "previous": null}]}),
-                )
+            "/api/internal/quality/v1/runs/{run}/source-secrets",
+            post(|| async {
+                Json(json!({"current": {"password": "c", "user": "u"},
+                    "previous": {"password": "p"}}))
             }),
         )
         .route(
@@ -83,19 +85,23 @@ async fn core() -> HttpCore {
 async fn the_adapter_reads_each_route() {
     let c = core().await;
     let job = JobRequest {
-        kind: "evaluate".into(),
-        dataset: Some("loans".into()),
+        kind: "tables".into(),
+        dataset: None,
         cut: None,
+        source: Some("crm".into()),
         attempt: 2,
     };
     let b = c.bundle("run-1", &job).await.unwrap();
     assert_eq!((b.jws.as_str(), b.digest.as_str()), ("h.p.s", "ab"));
     assert!(c.keys().await.unwrap().has("k1"));
-    assert_eq!(c.token(JOB, RunAs::Report).await.unwrap(), "t-report");
-    assert_eq!(
-        c.credentials(JOB).await.unwrap()[0].name,
-        "src_crm_password"
-    );
+    assert_eq!(c.token(JOB, TrinoUser::Report).await.unwrap(), "t-report");
+    assert_eq!(c.token(JOB, TrinoUser::Maint).await.unwrap(), "t-maint");
+    let creds = c.credentials(JOB).await.unwrap();
+    let pairs: Vec<_> = creds
+        .iter()
+        .map(|c| (c.name.as_str(), c.current.as_str(), c.previous.as_deref()))
+        .collect();
+    assert_eq!(pairs, [("password", "c", Some("p")), ("user", "u", None)]);
     assert_eq!(c.grants().await.unwrap()[0].subject, "job_sample_loans");
     assert!(c.bundle("../x", &job).await.is_err(), "not a run id");
 }

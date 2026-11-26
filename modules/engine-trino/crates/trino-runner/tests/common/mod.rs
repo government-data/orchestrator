@@ -11,8 +11,8 @@ use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 use trino_runner::{
-    digest_hex, Answer, Core, CoreError, Credential, JobRequest, Keys, RunAs, SignedBundle, Trino,
-    TrinoFailure, BUNDLE_TYP,
+    digest_hex, Answer, Core, CoreError, Credential, JobRequest, Keys, SignedBundle, Trino,
+    TrinoFailure, TrinoUser, BUNDLE_TYP,
 };
 
 pub const JOB: &str = "00000000-0000-4000-8000-00000000000a";
@@ -121,10 +121,10 @@ impl Core for FakeCore {
     async fn keys(&self) -> Result<Keys, CoreError> {
         Ok(keys(&self.key, "k1"))
     }
-    async fn token(&self, _: &str, run_as: RunAs) -> Result<String, CoreError> {
-        Ok(match run_as {
-            RunAs::Job => "job-token".into(),
-            RunAs::Report => "report-token".into(),
+    async fn token(&self, _: &str, user: TrinoUser) -> Result<String, CoreError> {
+        Ok(match user {
+            TrinoUser::Rules => "job-token".into(),
+            other => format!("{}-token", other.as_str()),
         })
     }
     async fn credentials(&self, _: &str) -> Result<Vec<Credential>, CoreError> {
