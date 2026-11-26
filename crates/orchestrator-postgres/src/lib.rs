@@ -21,6 +21,7 @@ pub use adoption::Adoption;
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
+pub use found::ScanAsked;
 pub use reaper::Cancelled;
 pub use removal::OnLines;
 pub use runs::{ClaimFor, NewRun, Renewal};

@@ -69,10 +69,13 @@ fn every_message_round_trips() {
         RenewAction::Cancel,
         RenewAction::Held,
     ] {
-        round_trip(&Renewed {
-            action,
-            lease_until: at("2026-11-25T10:02:30Z"),
-        });
+        for scan in [false, true] {
+            round_trip(&Renewed {
+                action,
+                lease_until: at("2026-11-25T10:02:30Z"),
+                scan,
+            });
+        }
     }
     round_trip(&Logs {
         lease: "lease-1".into(),
@@ -105,6 +108,7 @@ fn the_wire_names_are_snake_case() {
     let renewed = Renewed {
         action: RenewAction::Held,
         lease_until: at("2026-11-25T10:02:30Z"),
+        scan: false,
     };
     assert_eq!(serde_json::to_value(renewed).unwrap()["action"], "held");
     let answer = HoldAnswer {
@@ -115,6 +119,27 @@ fn the_wire_names_are_snake_case() {
         serde_json::to_value(answer).unwrap(),
         json!({"state": "free", "running": 0})
     );
+}
+
+#[test]
+fn a_scan_is_sent_only_when_asked_and_absent_reads_false() {
+    let quiet = Renewed {
+        action: RenewAction::Continue,
+        lease_until: at("2026-11-25T10:02:30Z"),
+        scan: false,
+    };
+    let wire = serde_json::to_value(&quiet).unwrap();
+    assert_eq!(
+        wire,
+        json!({"action": "continue", "lease_until": "2026-11-25T10:02:30Z"}),
+        "an answer without a scan reads as before the field"
+    );
+    assert_eq!(serde_json::from_value::<Renewed>(wire).unwrap(), quiet);
+    let asked = Renewed {
+        scan: true,
+        ..quiet
+    };
+    assert_eq!(serde_json::to_value(asked).unwrap()["scan"], true);
 }
 
 #[test]

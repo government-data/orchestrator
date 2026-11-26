@@ -217,7 +217,8 @@ impl<C: Clock> EnginePort<C> {
     }
 
     /// Extends a run's lease: `cancel` when someone cancelled it, `held`
-    /// while its engine is held, else `continue`.
+    /// while its engine is held, else `continue`; with `scan` while a scan
+    /// asked of its runner waits for its found report.
     pub async fn renew(&self, run: &str, r: &Renew) -> Result<Renewed, PortError> {
         let now = self.clock.now();
         let lease_until = now + Duration::seconds(i64::from(LEASE_SECS));
@@ -241,6 +242,7 @@ impl<C: Clock> EnginePort<C> {
         Ok(Renewed {
             action,
             lease_until,
+            scan: renewal.scan_requested,
         })
     }
 
