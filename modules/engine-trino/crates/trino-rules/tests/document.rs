@@ -108,6 +108,10 @@ fn catalogs_queries_sessions_functions_and_procedures() {
     assert_eq!(access(ANA, "lake"), None);
     assert_eq!(catalogs.last().unwrap(), &json!({"allow": "none"}));
     assert_eq!(
+        access("job_catalog", "src_[a-z0-9_]+"),
+        Some(json!("owner"))
+    );
+    assert_eq!(
         doc["system_session_properties"],
         json!([{"user": "qd-admin", "allow": true}, {"allow": false}])
     );

@@ -122,13 +122,14 @@ fn filter(g: &Grant) -> Option<String> {
     Some(format!("{} IN ({})", rows.column, values.join(", ")))
 }
 
-/// Who may use which catalog: `qd-admin` every one, `job_catalog` the
-/// sources' (to create and drop them), each grant's subject its catalog
-/// (people read-only), `bi-superset` gold read-only, nobody else any.
+/// Who may use which catalog: `qd-admin` owns every one, `job_catalog` the
+/// sources' (Trino creates and drops a catalog only for its owner), each
+/// grant's subject its catalog (people read-only), `bi-superset` gold
+/// read-only, nobody else any.
 fn catalogs(grants: &[&Grant]) -> Vec<Value> {
     let mut rules = vec![
-        json!({"user": "qd-admin", "allow": "all"}),
-        json!({"user": "job_catalog", "catalog": "src_[a-z0-9_]+", "allow": "all"}),
+        json!({"user": "qd-admin", "allow": "owner"}),
+        json!({"user": "job_catalog", "catalog": "src_[a-z0-9_]+", "allow": "owner"}),
         json!({"user": "bi-superset", "catalog": "gold", "allow": "read-only"}),
     ];
     // One rule per subject and catalog: `all` if any grant there writes.
