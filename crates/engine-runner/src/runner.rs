@@ -112,6 +112,11 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
         (self.descriptor.concurrency as usize).saturating_sub(self.slots.available_permits())
     }
 
+    /// The orchestrator it calls.
+    pub(crate) fn orchestrator(&self) -> &O {
+        &self.orchestrator
+    }
+
     /// Registers the engine's descriptor; call at start.
     pub async fn register(&self) -> Result<Registered, CallError> {
         self.orchestrator.register(&self.descriptor).await

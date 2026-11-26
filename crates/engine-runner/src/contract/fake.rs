@@ -9,8 +9,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::Utc;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Found, FoundAnswer, Inventory, InventoryAnswer, LogLine,
-    Logs, Registered, Renew, RenewAction, Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
+    Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, FolderRecord, Found,
+    FoundAnswer, Inventory, InventoryAnswer, LogLine, Logs, Registered, Renew, RenewAction,
+    Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
 };
 use orchestration_model::RunState;
 use serde_json::Value;
@@ -36,8 +37,18 @@ pub struct FakeRun {
     pub error_class: Option<String>,
 }
 
+/// A deploy as the fake keeps it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FakeDeploy {
+    pub deploy: DeployClaimed,
+    /// The runner that claimed it.
+    pub claimed_by: Option<String>,
+    pub finish: Option<DeployFinish>,
+}
+
 #[derive(Debug, Default)]
 struct State {
+    deploys: BTreeMap<String, FakeDeploy>,
     registered: Vec<Descriptor>,
     runs: BTreeMap<String, FakeRun>,
     next: u64,
@@ -99,6 +110,46 @@ impl FakeOrchestrator {
             );
             id
         })
+    }
+
+    /// Queues an import deploy of an artefact at `source_path`; its id.
+    #[must_use]
+    pub fn queue_import(&self, source_path: &str) -> String {
+        self.with(|s| {
+            s.next += 1;
+            let id = format!("deploy-{}", s.next);
+            let deploy = DeployClaimed {
+                deploy: id.clone(),
+                flow: format!("flow-{}", s.next),
+                source_path: source_path.to_string(),
+                source_sha256: "ab".repeat(32),
+                schedules: Vec::new(),
+                folder: FolderRecord {
+                    id: "folder-1".into(),
+                    name: "Imported".into(),
+                },
+                name: "imported".into(),
+                description: String::new(),
+                kind: SEED_KIND.into(),
+                parameters: serde_json::Map::new(),
+                timeout_secs: 60,
+                allow_overlap: false,
+                on_interrupt: None,
+            };
+            let kept = FakeDeploy {
+                deploy,
+                claimed_by: None,
+                finish: None,
+            };
+            s.deploys.insert(id.clone(), kept);
+            id
+        })
+    }
+
+    /// A deploy as kept now.
+    #[must_use]
+    pub fn deploy(&self, id: &str) -> Option<FakeDeploy> {
+        self.with(|s| s.deploys.get(id).cloned())
     }
 
     /// A run as kept now.
@@ -256,10 +307,66 @@ impl Orchestrator for FakeOrchestrator {
             ..InventoryAnswer::default()
         })
     }
+
+    /// The deploy this runner claimed and did not finish, else the first
+    /// queued one.
+    async fn claim_deploy(
+        &self,
+        _: &Descriptor,
+        c: &Claim,
+    ) -> Result<Option<DeployClaimed>, CallError> {
+        Ok(self.with(|s| {
+            let mine = |d: &&mut FakeDeploy| {
+                d.finish.is_none() && d.claimed_by.as_deref() == Some(c.runner.as_str())
+            };
+            let open = s.deploys.values_mut().any(|d| mine(&d));
+            let d = s.deploys.values_mut().find(|d| {
+                if open {
+                    mine(d)
+                } else {
+                    d.claimed_by.is_none()
+                }
+            })?;
+            d.claimed_by = Some(c.runner.clone());
+            Some(d.deploy.clone())
+        }))
+    }
+
+    /// Recorded once: the same end again is accepted and changes nothing.
+    async fn finish_deploy(&self, deploy: &str, f: &DeployFinish) -> Result<(), CallError> {
+        f.validate()
+            .map_err(|e| CallError::Refused(400, e.to_string()))?;
+        self.with(|s| {
+            let d = s.deploys.get_mut(deploy).ok_or(CallError::Lease)?;
+            match (&d.finish, &d.claimed_by) {
+                (Some(done), _) if done == f => Ok(()),
+                (None, Some(_)) => {
+                    d.finish = Some(f.clone());
+                    Ok(())
+                }
+                _ => Err(CallError::Lease),
+            }
+        })
+    }
 }
 
 #[async_trait]
 impl Seed for FakeOrchestrator {
+    async fn queue_deploy(&self) -> String {
+        self.queue_import("/srv/found/contract")
+    }
+
+    async fn deploy_state(&self, deploy: &str) -> String {
+        self.with(|s| match s.deploys.get(deploy) {
+            None => "unknown".into(),
+            Some(d) => match (&d.finish, &d.claimed_by) {
+                (Some(f), _) => f.state.as_str().into(),
+                (None, Some(_)) => "claimed".into(),
+                (None, None) => "queued".into(),
+            },
+        })
+    }
+
     async fn queue(&self, parameters: Value) -> String {
         self.queue_run(SEED_KIND, parameters)
     }
