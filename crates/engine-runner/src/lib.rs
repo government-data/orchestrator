@@ -11,6 +11,7 @@ pub mod contract;
 mod engine;
 mod metrics;
 mod runner;
+pub mod schedules;
 
 pub use client::{CallError, HttpOrchestrator, Orchestrator};
 pub use engine::{Engine, EngineError, Outcome, Refused, RunContext, RunRef};
