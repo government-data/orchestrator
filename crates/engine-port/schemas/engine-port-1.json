@@ -1,5 +1,104 @@
 {
   "messages": {
+    "ArtefactRecord": {
+      "$defs": {
+        "FolderRecord": {
+          "additionalProperties": false,
+          "description": "A folder, as a record names it: found again by id, else by name, else\ncreated with that id.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "`orchestrator.json`: one deployed version of a flow.",
+      "properties": {
+        "allow_overlap": {
+          "default": false,
+          "type": "boolean"
+        },
+        "deploy": {
+          "type": "string"
+        },
+        "deployed_at": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "flow": {
+          "description": "The flow: the same id in every version.",
+          "type": "string"
+        },
+        "folder": {
+          "$ref": "#/$defs/FolderRecord"
+        },
+        "format": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "on_interrupt": {
+          "default": null,
+          "description": "`none`, `repeat` or `continue`; absent: the installation's rule.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "default": {},
+          "description": "The flow's parameters (an object).",
+          "type": "object"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "timeout_secs": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "The version tag the deploy gave it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "flow",
+        "deploy",
+        "version",
+        "sha256",
+        "folder",
+        "name",
+        "kind",
+        "timeout_secs",
+        "deployed_at"
+      ],
+      "title": "ArtefactRecord",
+      "type": "object"
+    },
     "Claim": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -234,6 +333,266 @@
       "title": "Finish",
       "type": "object"
     },
+    "Found": {
+      "$defs": {
+        "Flag": {
+          "additionalProperties": false,
+          "description": "One thing flagged: its kind and what the engine names (a node, a path,\nan extension), at most 500 bytes.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/FlagKind"
+            },
+            "subject": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "subject"
+          ],
+          "type": "object"
+        },
+        "FlagKind": {
+          "description": "What the engine flags for review before an artefact is imported; an\nimport names every kind its artefacts carry as confirmed.",
+          "oneOf": [
+            {
+              "const": "code",
+              "description": "It runs code of its own (a script node).",
+              "type": "string"
+            },
+            {
+              "const": "path",
+              "description": "It reads or writes a path out of its folder, or one the runner does\nnot see.",
+              "type": "string"
+            },
+            {
+              "const": "missing",
+              "description": "It needs an extension the engine does not have.",
+              "type": "string"
+            }
+          ]
+        },
+        "FoundArtefact": {
+          "additionalProperties": false,
+          "description": "An artefact on the cluster that no deploy placed.",
+          "properties": {
+            "flags": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/Flag"
+              },
+              "type": "array"
+            },
+            "path": {
+              "description": "Its absolute path on the cluster.",
+              "type": "string"
+            },
+            "segments": {
+              "description": "Its path under the engine's root, by folder: the first proposes the\nfolder, the rest the name.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "sha256": {
+              "description": "The SHA-256 of its content (lowercase hex), as the engine digests it.",
+              "type": "string"
+            },
+            "size_bytes": {
+              "format": "uint64",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "path",
+            "segments",
+            "sha256",
+            "size_bytes"
+          ],
+          "type": "object"
+        },
+        "FoundCalendar": {
+          "description": "When an external schedule starts its artefact.",
+          "oneOf": [
+            {
+              "description": "A 5-field cron the orchestrator's schedules take as it is.",
+              "properties": {
+                "calendar": {
+                  "const": "cron",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "calendar",
+                "value"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "No equivalent (`@reboot`, `OnBootSec`, a calendar the scanner does\nnot convert): counted for a person, never created.",
+              "properties": {
+                "calendar": {
+                  "const": "unsupported",
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "calendar",
+                "value"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "FoundSchedule": {
+          "additionalProperties": false,
+          "description": "An external schedule that starts a found artefact.",
+          "properties": {
+            "artefact": {
+              "description": "The found artefact's path it starts.",
+              "type": "string"
+            },
+            "calendar": {
+              "$ref": "#/$defs/FoundCalendar"
+            },
+            "parameters": {
+              "additionalProperties": true,
+              "default": {},
+              "description": "The parameters its command passes, as the engine reads them.",
+              "type": "object"
+            },
+            "persistent": {
+              "default": false,
+              "description": "Whether it also keeps a missed start for later (`Persistent=true`).",
+              "type": "boolean"
+            },
+            "source": {
+              "$ref": "#/$defs/ScheduleSource"
+            },
+            "timezone": {
+              "description": "The cluster's time zone (IANA), if known.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "user": {
+              "description": "The account it runs as.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "user",
+            "calendar",
+            "artefact"
+          ],
+          "type": "object"
+        },
+        "ScheduleSource": {
+          "description": "Where an external schedule is, so that the runner can disable it.",
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "description": "A cron line: its file and its line number (from 1).",
+              "properties": {
+                "file": {
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "cron",
+                  "type": "string"
+                },
+                "line": {
+                  "format": "uint32",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "kind",
+                "file",
+                "line"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "description": "A systemd timer, by its unit name.",
+              "properties": {
+                "kind": {
+                  "const": "timer",
+                  "type": "string"
+                },
+                "unit": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "unit"
+              ],
+              "type": "object"
+            }
+          ]
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "`PUT /internal/engines/{engine}/{line}/found`: everything found now; it\nreplaces the runner's previous report.",
+      "properties": {
+        "artefacts": {
+          "items": {
+            "$ref": "#/$defs/FoundArtefact"
+          },
+          "type": "array"
+        },
+        "schedules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FoundSchedule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "artefacts"
+      ],
+      "title": "Found",
+      "type": "object"
+    },
+    "FoundAnswer": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "The answer to a report of what was found.",
+      "properties": {
+        "kept": {
+          "description": "Artefacts kept to be imported.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "relinked": {
+          "description": "Purged flows whose artefact appeared again, imported over their\nsame record.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kept",
+        "relinked"
+      ],
+      "title": "FoundAnswer",
+      "type": "object"
+    },
     "Hold": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,
@@ -291,6 +650,229 @@
         "running"
       ],
       "title": "HoldAnswer",
+      "type": "object"
+    },
+    "Inventory": {
+      "$defs": {
+        "ArtefactRecord": {
+          "additionalProperties": false,
+          "description": "`orchestrator.json`: one deployed version of a flow.",
+          "properties": {
+            "allow_overlap": {
+              "default": false,
+              "type": "boolean"
+            },
+            "deploy": {
+              "type": "string"
+            },
+            "deployed_at": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "description": {
+              "default": "",
+              "type": "string"
+            },
+            "flow": {
+              "description": "The flow: the same id in every version.",
+              "type": "string"
+            },
+            "folder": {
+              "$ref": "#/$defs/FolderRecord"
+            },
+            "format": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "on_interrupt": {
+              "default": null,
+              "description": "`none`, `repeat` or `continue`; absent: the installation's rule.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "parameters": {
+              "additionalProperties": true,
+              "default": {},
+              "description": "The flow's parameters (an object).",
+              "type": "object"
+            },
+            "sha256": {
+              "type": "string"
+            },
+            "timeout_secs": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            },
+            "version": {
+              "description": "The version tag the deploy gave it.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "format",
+            "flow",
+            "deploy",
+            "version",
+            "sha256",
+            "folder",
+            "name",
+            "kind",
+            "timeout_secs",
+            "deployed_at"
+          ],
+          "type": "object"
+        },
+        "FolderRecord": {
+          "additionalProperties": false,
+          "description": "A folder, as a record names it: found again by id, else by name, else\ncreated with that id.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name"
+          ],
+          "type": "object"
+        },
+        "InventoryItem": {
+          "additionalProperties": false,
+          "description": "One record the runner found, with the folder it is in.",
+          "properties": {
+            "path": {
+              "description": "The artefact's absolute path on the cluster.",
+              "type": "string"
+            },
+            "record": {
+              "$ref": "#/$defs/ArtefactRecord"
+            }
+          },
+          "required": [
+            "path",
+            "record"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "`PUT /internal/engines/{engine}/{line}/inventory`, at start: every\nrecord on the cluster.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/InventoryItem"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "Inventory",
+      "type": "object"
+    },
+    "InventoryAnswer": {
+      "$defs": {
+        "SkipReason": {
+          "description": "Why a record was not taken.",
+          "oneOf": [
+            {
+              "const": "invalid",
+              "description": "The record is malformed or of a newer format.",
+              "type": "string"
+            },
+            {
+              "const": "older_version",
+              "description": "A newer version of the same flow is on the cluster.",
+              "type": "string"
+            },
+            {
+              "const": "on_live_cluster",
+              "description": "The flow is placed on a cluster that is live.",
+              "type": "string"
+            },
+            {
+              "const": "path_registered",
+              "description": "Another flow is registered at that path.",
+              "type": "string"
+            }
+          ]
+        },
+        "Skipped": {
+          "additionalProperties": false,
+          "description": "A record not taken, and why.",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "reason": {
+              "$ref": "#/$defs/SkipReason"
+            }
+          },
+          "required": [
+            "path",
+            "reason"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "What the orchestrator did with an inventory.",
+      "properties": {
+        "already_adopted": {
+          "description": "The cluster had adopted its inventory before: nothing changed.",
+          "type": "boolean"
+        },
+        "folders_created": {
+          "default": 0,
+          "description": "Folders created again because neither their id nor name existed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reattached": {
+          "default": [],
+          "description": "Known flows moved to this cluster, their runs, schedules,\nvariables and folder kept (flow ids).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "registered": {
+          "default": [],
+          "description": "Unknown flows registered again with their same id.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "skipped": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Skipped"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "already_adopted"
+      ],
+      "title": "InventoryAnswer",
       "type": "object"
     },
     "Logs": {

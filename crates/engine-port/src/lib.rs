@@ -12,14 +12,26 @@
 //! | `POST /internal/runs/{id}/finish` | [`Finish`] | 204 |
 //! | `POST /internal/engines/{engine}/hold` | [`Hold`] | [`HoldAnswer`] |
 //! | `POST /internal/engines/{engine}/release` | [`Release`] | 204 |
+//! | `PUT /internal/engines/{engine}/{line}/found` | [`Found`] | [`FoundAnswer`] |
+//! | `PUT /internal/engines/{engine}/{line}/inventory` | [`Inventory`] | [`InventoryAnswer`] |
 
 mod descriptor;
+mod found;
+mod inventory;
 mod runs;
 mod schema;
 
 pub use descriptor::{
     check_port, is_kind_name, Descriptor, Refused, Registered, RunKind, LEASE_SECS,
     MAX_CONCURRENCY, MAX_KINDS, PORT, RENEW_EVERY_SECS, SERVED_PORTS,
+};
+pub use found::{
+    is_sha256, Flag, FlagKind, Found, FoundAnswer, FoundArtefact, FoundCalendar, FoundSchedule,
+    ScheduleSource, MAX_FLAGS, MAX_FOUND, MAX_PATH_BYTES,
+};
+pub use inventory::{
+    ArtefactRecord, FolderRecord, Inventory, InventoryAnswer, InventoryItem, SkipReason, Skipped,
+    RECORD_FILE, RECORD_FORMAT,
 };
 pub use runs::{
     Claim, Claimed, Finish, Hold, HoldAnswer, HoldState, LogLine, LogStream, Logs, Progress,
