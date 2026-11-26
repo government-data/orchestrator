@@ -169,11 +169,11 @@ async fn the_listed_modules_are_installed_with_the_shared_token() {
         &core,
         StatusCode::OK,
         r#"{"modules": [{"name": "orchestrator", "version": "0.3.0"},
-        {"name": "engine-trino", "version": "0.2.0"}]}"#,
+        {"name": "engine-a", "version": "0.2.0"}]}"#,
     );
     assert_eq!(
         modules.installed().await,
-        Some(vec!["orchestrator".into(), "engine-trino".into()])
+        Some(vec!["orchestrator".into(), "engine-a".into()])
     );
     assert_eq!(core.tokens.load(Ordering::SeqCst), 1, "one token for both");
 }
