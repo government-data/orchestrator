@@ -9,8 +9,20 @@
 mod client;
 pub mod contract;
 mod engine;
+mod metrics;
 mod runner;
 
 pub use client::{CallError, HttpOrchestrator, Orchestrator};
 pub use engine::{Engine, EngineError, Outcome, Refused, RunContext, RunRef};
+pub use metrics::{PauseReason, RunnerMetrics, RunnerResult};
 pub use runner::{Ended, Guard, NoGuard, Pause, Runner};
+
+/// The runner's metrics file in `QD_METRICS_DIR`, with `registry`, named
+/// after its engine module (`<module>.prom`); `None` when off.
+#[must_use]
+pub fn metrics_file(
+    module: &str,
+    registry: prometheus_client::registry::Registry,
+) -> Option<logging::metrics::MetricsFile> {
+    logging::metrics::MetricsFile::from_env(module, registry)
+}
