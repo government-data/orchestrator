@@ -12,7 +12,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use engine_port::{Claim, DeployFinish, Descriptor, Finish, Found, Hold, Logs, Release, Renew};
+use engine_port::{
+    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Logs, Release, Renew,
+};
 use orchestration_model::{EngineLine, EngineName, Line};
 use serde_json::json;
 
@@ -100,6 +102,7 @@ impl IntoResponse for ApiError {
                 error(StatusCode::CONFLICT, &port.to_string())
             }
             PortError::UnknownEngine => error(StatusCode::NOT_FOUND, &port.to_string()),
+            PortError::Unavailable => error(StatusCode::SERVICE_UNAVAILABLE, &port.to_string()),
             PortError::Store(e) => {
                 tracing::error!(error = %e, "engine port: the store failed");
                 error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
@@ -130,6 +133,10 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
             post(claim_deploy::<C>),
         )
         .route("/internal/engines/{engine}/{line}/found", put(found::<C>))
+        .route(
+            "/internal/engines/{engine}/{line}/inventory",
+            put(inventory::<C>),
+        )
         .route("/internal/engines/{engine}/hold", post(hold::<C>))
         .route("/internal/engines/{engine}/release", post(release::<C>))
         .route("/internal/removal", get(removal::<C>))
@@ -195,6 +202,16 @@ async fn found<C: Clock>(
 ) -> Result<Response, ApiError> {
     let e = engine_line(&engine, &line)?;
     Ok(Json(s.port.found(&m, &e, f).await?).into_response())
+}
+
+async fn inventory<C: Clock>(
+    State(s): Shared<C>,
+    Caller(m, _): Caller,
+    Path((engine, line)): Path<(String, String)>,
+    Json(i): Json<Inventory>,
+) -> Result<Response, ApiError> {
+    let e = engine_line(&engine, &line)?;
+    Ok(Json(s.port.inventory(&m, &e, i).await?).into_response())
 }
 
 async fn renew<C: Clock>(

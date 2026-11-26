@@ -107,6 +107,15 @@ impl Harness {
         self.app = router(Arc::new(state));
     }
 
+    /// Serves the port again, reading the live machines from `machines`.
+    pub fn with_machines(&mut self, machines: Arc<dyn orchestrator_server::MachineList>) {
+        let state = PortState {
+            port: EnginePort::new(self.store.clone(), self.clock.clone()).with_machines(machines),
+            auth: Arc::new(HeaderMachine),
+        };
+        self.app = router(Arc::new(state));
+    }
+
     /// Serves the port again, counting in `metrics`.
     pub fn with_metrics(&mut self, metrics: Arc<orchestrator_server::Metrics>) {
         let state = PortState {

@@ -19,7 +19,7 @@ use std::collections::BTreeMap;
 use orchestrator_postgres::VariableValue;
 use serde_json::Value;
 
-use crate::{Clock, Metrics, Sealer};
+use crate::{Clock, MachineList, Metrics, Sealer};
 
 /// Who calls the engine port: a machine of the installation, as its
 /// certificate names it.
@@ -37,6 +37,8 @@ pub enum PortError {
     UnknownEngine,
     /// The deploy is not one this machine claimed, or it ended otherwise.
     NotTheirs,
+    /// What the call needs from the core cannot be read now.
+    Unavailable,
     /// The store failed.
     Store(StoreError),
 }
@@ -50,6 +52,7 @@ impl fmt::Display for PortError {
             Self::NotTheirs => {
                 f.write_str("the deploy is not this machine's to finish, or it ended otherwise")
             }
+            Self::Unavailable => f.write_str("the core's live machines cannot be read now"),
             Self::Store(e) => e.fmt(f),
         }
     }
@@ -79,12 +82,19 @@ pub fn runner_of(machine: &Machine, engine: &EngineLine) -> String {
 }
 
 /// The engine port, on a store and a clock.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EnginePort<C> {
     pub(crate) store: PgStore,
     pub(crate) clock: C,
     metrics: Option<Arc<Metrics>>,
     sealer: Option<Arc<Sealer>>,
+    pub(crate) machines: Option<Arc<dyn MachineList>>,
+}
+
+impl<C> fmt::Debug for EnginePort<C> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EnginePort").finish_non_exhaustive()
+    }
 }
 
 impl<C: Clock> EnginePort<C> {
@@ -94,7 +104,16 @@ impl<C: Clock> EnginePort<C> {
             clock,
             metrics: None,
             sealer: None,
+            machines: None,
         }
+    }
+
+    /// Reads which machines are live from the core (decision 0011,
+    /// re-attach); without it, no inventory is adopted.
+    #[must_use]
+    pub fn with_machines(mut self, machines: Arc<dyn MachineList>) -> Self {
+        self.machines = Some(machines);
+        self
     }
 
     /// Opens sealed variables and secrets with `sealer` when it hands a run
