@@ -12,7 +12,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-use crate::{CallError, Engine, Orchestrator, Outcome, RunContext, RunRef};
+use crate::{CallError, Engine, Orchestrator, Outcome, RunContext, RunRef, RunnerMetrics};
 
 /// Why a runner claims nothing now (its own guard, decision 0011).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,6 +62,7 @@ pub struct Runner<E, O, G> {
     descriptor: Descriptor,
     slots: Arc<Semaphore>,
     renew_every: Duration,
+    metrics: Option<Arc<RunnerMetrics>>,
 }
 
 impl<E, O, G> std::fmt::Debug for Runner<E, O, G> {
@@ -85,6 +86,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
             descriptor,
             slots,
             renew_every: Duration::from_secs(u64::from(engine_port::RENEW_EVERY_SECS)),
+            metrics: None,
         }
     }
 
@@ -95,6 +97,17 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
         self
     }
 
+    /// Counts in `metrics` (its metrics file).
+    #[must_use]
+    pub fn with_metrics(mut self, metrics: Arc<RunnerMetrics>) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
+
+    fn busy(&self) -> usize {
+        (self.descriptor.concurrency as usize).saturating_sub(self.slots.available_permits())
+    }
+
     /// Registers the engine's descriptor; call at start.
     pub async fn register(&self) -> Result<Registered, CallError> {
         self.orchestrator.register(&self.descriptor).await
@@ -103,7 +116,12 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
     /// Claims one run if a slot is free and the guard allows it, and drives
     /// it in a task; `None` when there was nothing to take.
     pub async fn claim_once(&self) -> Result<Option<JoinHandle<Ended>>, CallError> {
-        if self.guard.claim_paused().is_some() {
+        let paused = self.guard.claim_paused();
+        if let Some(m) = &self.metrics {
+            m.paused(paused);
+            m.busy(self.busy());
+        }
+        if paused.is_some() {
             return Ok(None);
         }
         let Ok(permit) = Arc::clone(&self.slots).try_acquire_owned() else {
@@ -121,7 +139,21 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
             guard: Arc::clone(&self.guard),
             renew_every: self.renew_every,
         };
-        Ok(Some(tokio::spawn(drive.run(run, permit))))
+        let metrics = self.metrics.clone();
+        let slots = Arc::clone(&self.slots);
+        let concurrency = self.descriptor.concurrency as usize;
+        let kind = run.kind.clone();
+        if let Some(m) = &metrics {
+            m.busy(self.busy());
+        }
+        Ok(Some(tokio::spawn(async move {
+            let ended = drive.run(run, permit).await;
+            if let Some(m) = metrics {
+                m.ended(&kind, &ended);
+                m.busy(concurrency.saturating_sub(slots.available_permits()));
+            }
+            ended
+        })))
     }
 }
 
