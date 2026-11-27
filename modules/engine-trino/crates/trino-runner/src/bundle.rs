@@ -89,6 +89,11 @@ pub struct Statement {
     /// (amendment A1); otherwise it is skipped.
     #[serde(default)]
     pub only_if_rows: Option<OnlyIfRows>,
+    /// The per-table lock it writes under (ruling 92(b)): a table's name
+    /// `<catalog>.<schema>.<table>`, held from before the first statement
+    /// that names it to after the last.
+    #[serde(default)]
+    pub lock: Option<String>,
 }
 
 /// The count a statement waits on.
@@ -132,6 +137,7 @@ impl std::fmt::Debug for Statement {
         f.debug_struct("Statement")
             .field("id", &self.id)
             .field("expects", &self.expects)
+            .field("lock", &self.lock)
             .finish_non_exhaustive()
     }
 }

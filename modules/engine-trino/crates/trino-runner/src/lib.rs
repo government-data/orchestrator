@@ -2,11 +2,13 @@
 //! and step 20): the core's signed statement bundle and its verification,
 //! the check of each answer's shape, the class of Trino's errors, and
 //! [`TrinoEngine`], engine-runner's `Engine` that runs a bundle through
-//! the [`Core`] and [`Trino`] ports, and the slot pools it sends.
+//! the [`Core`] and [`Trino`] ports, taking the per-table locks its
+//! statements name, and the slot pools it sends.
 
 mod bundle;
 mod check;
 mod engine;
+mod locks;
 mod pools;
 mod ports;
 mod report;

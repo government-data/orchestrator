@@ -16,6 +16,7 @@ use serde_json::{json, Value};
 use tokio::sync::Notify;
 
 use crate::bundle::{bundle_kid, Bundle, BundleRefused, Keys, SignedBundle};
+use crate::locks::{give_back, Locks};
 use crate::ports::{Core, JobRequest, Trino, TrinoUser};
 use crate::report::Trail;
 use crate::steps::Known;
@@ -62,6 +63,8 @@ pub struct TrinoEngine<C, T> {
     kill_poll: Duration,
     /// How long a report's first retry waits.
     pub(crate) report_wait: Duration,
+    /// How long a lock not granted waits before it is asked again.
+    lock_wait: Duration,
     /// Per running run: the job's token and its cancel signal.
     running: Mutex<HashMap<String, (String, Arc<Notify>)>>,
 }
@@ -92,15 +95,18 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             concurrency,
             kill_poll: Duration::from_secs(1),
             report_wait: crate::report::REPORT_WAIT,
+            lock_wait: crate::locks::LOCK_WAIT,
             running: Mutex::new(HashMap::new()),
         }
     }
 
-    /// Polls a killed query and retries a report faster (tests).
+    /// Polls a killed query, retries a report and asks again for a lock
+    /// faster (tests).
     #[must_use]
     pub fn polling_every(mut self, every: Duration) -> Self {
         self.kill_poll = every;
         self.report_wait = every;
+        self.lock_wait = every;
         self
     }
 
@@ -220,10 +226,16 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         let (from, known) =
             Known::parse(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
         let mut trail = Trail::default();
+        let held = Arc::default();
+        let mut locks = Locks::new(&bundle, ctx, self.lock_wait, Arc::clone(&held));
         let outcome = tokio::select! {
-            o = self.statements(&job, &bundle, (from, known), &token, ctx, &mut trail) => o,
-            () = cancel.notified() => return Outcome::cancelled(),
+            o = self.statements(&job, &bundle, (from, known), &token, &mut locks, &mut trail) => o,
+            () = cancel.notified() => {
+                give_back(ctx, &held).await;
+                return Outcome::cancelled();
+            }
         };
+        give_back(ctx, &held).await;
         let Some(report) = trail.report(&signed.digest, &outcome) else {
             return outcome;
         };
