@@ -10,6 +10,7 @@ mod engines;
 mod flows;
 mod found;
 mod locks;
+mod pools;
 mod reaper;
 mod removal;
 mod runs;
