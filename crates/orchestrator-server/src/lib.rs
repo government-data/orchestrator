@@ -14,6 +14,7 @@ mod inventory;
 mod machines;
 mod metrics;
 mod modules;
+mod outbox;
 mod people;
 mod port;
 mod removal;
@@ -36,6 +37,7 @@ pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO
 pub use machines::MachineList;
 pub use metrics::{Metrics, RunResult};
 pub use modules::{installed_lines, ModuleList};
+pub use outbox::{send_outbox, OutboxSent};
 pub use people::{
     person_of, CachedActions, EffectiveActions, OidcPeople, People, Person, PersonTokens, Refused,
     IMPORT_FLOWS,
