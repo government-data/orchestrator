@@ -4,6 +4,7 @@
 
 mod clock;
 mod core_api;
+mod core_calls;
 mod core_schedules;
 mod deploys;
 mod events;
@@ -29,6 +30,7 @@ pub use clock::{Clock, FixedClock, SystemClock};
 pub use core_api::{
     CoreToken, HttpEffectiveActions, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE,
 };
+pub use core_calls::{core_router, DrainAnswer};
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
 pub use events::{
     iam_changes_once, watch_iam_changes, CoreEvents, Event, HttpEvents, Published, Received,

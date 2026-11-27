@@ -6,6 +6,7 @@
 mod adoption;
 mod chains;
 mod deploys;
+mod drain;
 mod engines;
 mod flows;
 mod found;
@@ -25,6 +26,7 @@ mod windows;
 pub use adoption::Adoption;
 pub use chains::{ChainsMoved, NewChain};
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
+pub use drain::DrainCounts;
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
 pub use found::ScanAsked;

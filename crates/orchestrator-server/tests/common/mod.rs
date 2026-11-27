@@ -13,7 +13,9 @@ use chrono::{DateTime, Utc};
 use engine_port::{Descriptor, RunKind, PORT};
 use orchestration_model::{EngineLine, EngineName, Line, OnInterrupt, Trigger};
 use orchestrator_postgres::{NewFlow, NewRun, PgStore};
-use orchestrator_server::{router, Authenticate, EnginePort, FixedClock, Machine, PortState};
+use orchestrator_server::{
+    core_router, router, Authenticate, EnginePort, FixedClock, Machine, PortState,
+};
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use testcontainers::runners::AsyncRunner;
@@ -39,6 +41,12 @@ impl Authenticate for HeaderMachine {
         let name = headers.get("x-test-module")?.to_str().ok()?;
         Some(name.to_string())
     }
+}
+
+/// The engine port and the core's calls, as the server serves them.
+fn app(state: PortState<FixedClock>) -> axum::Router {
+    let state = Arc::new(state);
+    router(Arc::clone(&state)).merge(core_router(state))
 }
 
 pub struct Harness {
@@ -72,7 +80,7 @@ pub async fn harness() -> Harness {
         _container: container,
         store,
         clock,
-        app: router(Arc::new(state)),
+        app: app(state),
     }
 }
 
@@ -104,7 +112,7 @@ impl Harness {
             port: EnginePort::new(self.store.clone(), self.clock.clone()).with_sealer(sealer),
             auth: Arc::new(HeaderMachine),
         };
-        self.app = router(Arc::new(state));
+        self.app = app(state);
     }
 
     /// Serves the port again, reading the live machines from `machines`.
@@ -113,7 +121,7 @@ impl Harness {
             port: EnginePort::new(self.store.clone(), self.clock.clone()).with_machines(machines),
             auth: Arc::new(HeaderMachine),
         };
-        self.app = router(Arc::new(state));
+        self.app = app(state);
     }
 
     /// Serves the port again, counting in `metrics`.
@@ -123,7 +131,7 @@ impl Harness {
                 .with_metrics(Arc::clone(&metrics)),
             auth: Arc::new(HeaderMachine),
         };
-        self.app = orchestrator_server::counted(router(Arc::new(state)), metrics);
+        self.app = orchestrator_server::counted(app(state), metrics);
     }
 
     /// A call of the fake engine from `machine` (`None`: no identity).
