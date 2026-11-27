@@ -7,7 +7,8 @@ use async_trait::async_trait;
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use orchestrator_server::{
-    people_router, EffectiveActions, EnginePort, People, PeopleState, Person, PersonTokens,
+    people_router, EffectiveActions, EnginePort, FixedClock, People, PeopleState, Person,
+    PersonTokens,
 };
 use serde_json::Value;
 use tower::ServiceExt;
@@ -50,9 +51,14 @@ impl FakeCore {
 
 /// The people's API on the harness's store, and its fake core.
 pub fn people_app(h: &Harness) -> (axum::Router, FakeCore) {
+    people_app_on(EnginePort::new(h.store.clone(), h.clock.clone()))
+}
+
+/// The people's API on `port`, and its fake core.
+pub fn people_app_on(port: EnginePort<FixedClock>) -> (axum::Router, FakeCore) {
     let core = FakeCore::default();
     let state = PeopleState {
-        port: EnginePort::new(h.store.clone(), h.clock.clone()),
+        port,
         people: People::new(Arc::new(HeaderPerson), Arc::new(core.clone())),
     };
     (people_router(Arc::new(state)), core)
