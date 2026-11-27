@@ -8,6 +8,7 @@ mod core_calls;
 mod core_chains;
 mod core_schedules;
 mod core_schedules_http;
+mod core_token;
 mod deploys;
 mod events;
 mod found;
@@ -41,6 +42,7 @@ pub use core_calls::{core_router, DrainAnswer};
 pub use core_chains::{chains_router, ChainAsked, ChainStarted, CORE_JOB_ORIGIN};
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
 pub use core_schedules_http::HttpCoreSchedules;
+pub use core_token::{CoreCaller, CORE_CLIENT};
 pub use events::{
     iam_changes_once, watch_iam_changes, CoreEvents, Event, HttpEvents, Published, Received,
     IAM_CHANGED,

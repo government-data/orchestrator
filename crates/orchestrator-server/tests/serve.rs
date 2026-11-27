@@ -218,8 +218,8 @@ async fn the_server_starts_serves_and_stops() {
     let res = chains.send().await.unwrap();
     assert_eq!(
         res.status(),
-        503,
-        "the core's machine; no flow for its chains"
+        401,
+        "the core's machine without the core's own token"
     );
     let found = format!("{base}/orchestrator/api/v1/found?machine=m&engine=e&line=-");
     assert_eq!(get_status(&http, &found).await, Some(401), "not signed in");

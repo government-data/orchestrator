@@ -1,14 +1,15 @@
 //! The core starts a chain on demand (core decision 0090, step 19): _Run
 //! now_ and the kinds a person asks for (a source's listing, a test of a
 //! rule, a console query) reach the orchestrator as a call of the core's
-//! machine on the `internal` entry point, with no token. The core's job id
-//! is the chain's origin, so the same job asked twice starts one chain.
+//! machine on the `internal` entry point, with the core's own token
+//! ([`crate::CoreCaller`], rulings 100 and 103). The core's job id is the
+//! chain's origin, so the same job asked twice starts one chain.
 //!
 //! | Call | Answers |
 //! | --- | --- |
 //! | `POST /internal/chains` `{"job_id", "steps": [{"kind", "parameters", "setup"?: {"key", "fingerprint"}}]}` | `201 {"chain_id"}` started; `200 {"chain_id"}` that job's chain, started before |
 //!
-//! A call from any other machine is `401`; malformed steps are `422`; with
+//! A call from any other machine, or without the core's token, is `401`; malformed steps are `422`; with
 //! no flow set for the core's chains, `503`.
 
 use std::sync::Arc;
@@ -93,8 +94,8 @@ impl<C: Clock> EnginePort<C> {
     }
 }
 
-/// The core's chain requests; `state.auth` admits the core's machine
-/// alone ([`crate::CoreMachine`]).
+/// The core's chain requests; `state.auth` admits the core's machine with
+/// its own token alone ([`crate::CoreCaller`]).
 pub fn chains_router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
     Router::new()
         .route("/internal/chains", post(start::<C>))
