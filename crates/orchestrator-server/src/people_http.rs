@@ -8,6 +8,8 @@
 //! | `GET /api/v1/found`        | what a runner last found, to choose from       |
 //! | `POST /api/v1/imports`     | import chosen artefacts (at most 500)          |
 //! | `POST /api/v1/scans`       | ask a runner to report what it finds now       |
+//!
+//! Flows, folders, runs and logs are read in [`crate::people_views`].
 
 use std::sync::Arc;
 
@@ -36,7 +38,7 @@ impl<C> std::fmt::Debug for PeopleState<C> {
     }
 }
 
-type Shared<C> = State<Arc<PeopleState<C>>>;
+pub(crate) type Shared<C> = State<Arc<PeopleState<C>>>;
 
 /// The people's API's routes.
 pub fn people_router<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
@@ -44,14 +46,15 @@ pub fn people_router<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
         .route("/api/v1/found", get(found::<C>))
         .route("/api/v1/imports", post(import::<C>))
         .route("/api/v1/scans", post(scan::<C>))
-        .with_state(state)
+        .with_state(Arc::clone(&state))
+        .merge(crate::people_views::routes(state))
 }
 
-fn error(status: StatusCode, why: &str) -> Response {
+pub(crate) fn error(status: StatusCode, why: &str) -> Response {
     (status, Json(json!({ "error": why }))).into_response()
 }
 
-fn failed(e: &StoreError) -> Response {
+pub(crate) fn failed(e: &StoreError) -> Response {
     tracing::error!(error = %e, "people's API: the store failed");
     error(StatusCode::INTERNAL_SERVER_ERROR, "internal error")
 }
