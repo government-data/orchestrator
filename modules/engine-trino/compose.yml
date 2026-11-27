@@ -146,6 +146,7 @@ services:
       QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
       TRINO_URL: https://${TRINO_NODE_NAME:?}:${TRINO_PORT:-8490}
       TRINO_VERSION: "484"
+      TRINO_TIER: ${TRINO_TIER:-s}
       RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-1}
     extra_hosts: ["${TRINO_NODE_NAME:?}:host-gateway"]
     volumes:
