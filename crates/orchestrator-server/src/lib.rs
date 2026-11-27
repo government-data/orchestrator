@@ -6,6 +6,7 @@ mod clock;
 mod core_api;
 mod core_calls;
 mod core_schedules;
+mod core_schedules_http;
 mod deploys;
 mod events;
 mod found;
@@ -34,6 +35,7 @@ pub use core_api::{
 };
 pub use core_calls::{core_router, DrainAnswer};
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
+pub use core_schedules_http::HttpCoreSchedules;
 pub use events::{
     iam_changes_once, watch_iam_changes, CoreEvents, Event, HttpEvents, Published, Received,
     IAM_CHANGED,

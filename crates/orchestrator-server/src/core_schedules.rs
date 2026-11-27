@@ -1,13 +1,12 @@
 //! The schedules the core keeps and the orchestrator fires (core decision
-//! 0090, point 2: "the operator fires them and asks the core to compile the
-//! chain at that moment"). The core lists its schedules; the scheduler
-//! keeps each as a schedule of one flow, fires it by the orchestrator's
-//! rules, and at each fire asks the core what to run: a chain of steps (a
-//! cut's prepare, extract, derive, evaluate), or nothing (a cut that is
-//! blocked).
+//! 0090, point 2). The core lists its schedules; the scheduler keeps each
+//! as a schedule of one flow, fires it by the orchestrator's rules, and at
+//! each fire asks the core what to run: a chain of steps (a cut's prepare,
+//! extract, derive, evaluate), or nothing (a cut that is blocked). The
+//! core compiles a step's statements only when its job runner first asks
+//! for the run's bundle, not at the fire.
 //!
-//! The core has no such route yet: this port is the orchestrator's side,
-//! tested with a fake; its HTTP adapter follows the core's route.
+//! Its HTTP adapter is [`crate::HttpCoreSchedules`].
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
