@@ -1,12 +1,13 @@
 //! The orchestrator's model, for every engine without naming one (decision
 //! 0011): flows and the engine and line each is pinned to, runs and their state
-//! machine, what an interrupted run does, what keeps a flow from firing, the fires
-//! missed and the maintenance windows.
+//! machine, chains of runs, what an interrupted run does, what keeps a flow
+//! from firing, the fires missed and the maintenance windows.
 //!
 //! Pure: no I/O, no clock. The server's adapters store it and its use cases
 //! drive it.
 
 mod attempts;
+mod chain;
 mod flow;
 mod missed;
 mod run;
@@ -16,6 +17,7 @@ pub use attempts::{
     retry, retry_delay, Interrupted, Interruption, OnInterrupt, Retry, MAX_ATTEMPTS,
     RETRY_FIRST_DELAY_SECS, RETRY_MAX_AGE_HOURS, RETRY_MAX_DELAY_SECS,
 };
+pub use chain::{next_move, validate_steps, ChainMove, ChainStep, Setup, MAX_STEPS};
 pub use flow::{
     blocked, merge_parameters, Blocked, EngineLine, EngineName, EnginePause, Flow, Folder,
     InvalidName, Line,
