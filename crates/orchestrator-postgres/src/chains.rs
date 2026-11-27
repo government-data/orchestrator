@@ -88,6 +88,16 @@ impl PgStore {
         Ok(moved)
     }
 
+    /// The id of the chain of `origin`, if one was started.
+    pub async fn chain_of_origin(&self, origin: &str) -> Result<Option<String>, StoreError> {
+        let id: Option<String> =
+            sqlx::query_scalar("SELECT id::text FROM chains WHERE origin = $1")
+                .bind(origin)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(id)
+    }
+
     /// A chain's state and the step it is at.
     pub async fn chain_state(&self, id: &str) -> Result<Option<(String, u32)>, StoreError> {
         let row = sqlx::query("SELECT state, step FROM chains WHERE id = $1::uuid")
