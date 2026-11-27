@@ -168,11 +168,7 @@ impl<C: Clock> EnginePort<C> {
         }
         let runner = runner_of(machine, engine);
         self.store.seen(&runner, None, now).await?;
-        let windows = self.store.maintenance_windows().await?;
-        if open_windows(&windows, &Calendar, now)
-            .iter()
-            .any(|w| w.cluster == machine.0)
-        {
+        if self.in_window(machine, now).await? {
             return Ok(None);
         }
         let lease = uuid::Uuid::new_v4().to_string();
@@ -208,6 +204,19 @@ impl<C: Clock> EnginePort<C> {
                 Ok(None)
             }
         }
+    }
+
+    /// Whether the machine's cluster is in an open maintenance window now:
+    /// it is handed out nothing, neither runs nor deploys.
+    pub(crate) async fn in_window(
+        &self,
+        machine: &Machine,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Result<bool, PortError> {
+        let windows = self.store.maintenance_windows().await?;
+        Ok(open_windows(&windows, &Calendar, now)
+            .iter()
+            .any(|w| w.cluster == machine.0))
     }
 
     /// A flow's variables, sealed ones and secrets opened; `None` when one
