@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "orchestrator.chain.finished v1",
+  "description": "A chain ended: its id, state and origin (what fired it: a schedule's fire or the core's job). No parameter, value or person.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["chain_id", "state", "origin"],
+  "properties": {
+    "chain_id": { "type": "string", "format": "uuid" },
+    "state": { "enum": ["succeeded", "failed"] },
+    "origin": { "type": "string", "minLength": 1, "maxLength": 200 }
+  }
+}

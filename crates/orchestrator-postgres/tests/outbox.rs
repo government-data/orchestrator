@@ -1,15 +1,25 @@
 //! The outbox: every way a run ends writes one `orchestrator.run.finished`
 //! event whose data fits the module's schema; a renewal writes none; the
-//! events are read in order until marked sent or refused.
+//! events are read in order until marked sent or refused. A claim's
+//! `orchestrator.run.started` and a chain's `orchestrator.chain.finished`
+//! are in `events.rs`.
 
 mod common;
 
 use chrono::{Duration, Utc};
-use common::{at, descriptor, new_flow};
+use common::{at, descriptor, fits_the_schema, new_flow};
 use engine_port::Finish;
 use orchestration_model::{EngineLine, EngineName, FinalState, Line, Trigger};
-use orchestrator_postgres::{ClaimFor, NewRun, PgStore};
-use serde_json::Value;
+use orchestrator_postgres::{ClaimFor, NewRun, OutboxEvent, PgStore};
+
+const FINISHED: &str = "orchestrator.run.finished";
+
+/// The pending `orchestrator.run.finished` events, in order.
+async fn finished_events(store: &PgStore) -> Vec<OutboxEvent> {
+    let mut events = store.pending_events(100).await.unwrap();
+    events.retain(|e| e.topic == FINISHED);
+    events
+}
 
 async fn queue(store: &PgStore, folder: &str) -> String {
     let now = at("2026-11-27T10:00:00Z");
@@ -51,26 +61,6 @@ async fn claim(store: &PgStore, lease: &str, now: chrono::DateTime<Utc>) -> Stri
     store.claim(&c).await.unwrap().unwrap().run
 }
 
-/// The module's schema for the event: every required key is there, every
-/// key is a property, and an enum's value is one of its values.
-fn fits_the_schema(data: &Value) {
-    let path = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../modules/orchestrator/events/run-finished.v1.json"
-    );
-    let schema: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
-    let properties = schema["properties"].as_object().unwrap();
-    for key in schema["required"].as_array().unwrap() {
-        assert!(data.get(key.as_str().unwrap()).is_some(), "{key} missing");
-    }
-    for (key, value) in data.as_object().unwrap() {
-        let property = properties.get(key).unwrap_or_else(|| panic!("{key}"));
-        if let Some(values) = property.get("enum") {
-            assert!(values.as_array().unwrap().contains(value), "{key}");
-        }
-    }
-}
-
 #[tokio::test]
 async fn every_end_of_a_run_writes_one_event() {
     let db = common::database().await;
@@ -83,10 +73,7 @@ async fn every_end_of_a_run_writes_one_event() {
         .renew(&finished, "l1", None, None, now + Duration::minutes(2))
         .await
         .unwrap();
-    assert!(
-        store.pending_events(10).await.unwrap().is_empty(),
-        "a renewal"
-    );
+    assert!(finished_events(&store).await.is_empty(), "a renewal");
     let failed = Finish {
         lease: "l1".into(),
         state: FinalState::Failed,
@@ -102,15 +89,12 @@ async fn every_end_of_a_run_writes_one_event() {
     claim(&store, "l2", now).await;
     store.reap(now + Duration::minutes(3)).await.unwrap();
 
-    let events = store.pending_events(10).await.unwrap();
+    let events = finished_events(&store).await;
     let told: Vec<(&str, &str)> = events
         .iter()
         .map(|e| {
-            assert_eq!(
-                (e.topic.as_str(), e.version),
-                ("orchestrator.run.finished", 1)
-            );
-            fits_the_schema(&e.data);
+            assert_eq!((e.topic.as_str(), e.version), (FINISHED, 1));
+            fits_the_schema("run-finished.v1.json", &e.data);
             (
                 e.data["run_id"].as_str().unwrap(),
                 e.data["state"].as_str().unwrap(),
@@ -133,7 +117,7 @@ async fn every_end_of_a_run_writes_one_event() {
 
     store.event_sent(events[0].seq, now).await.unwrap();
     store.event_refused(events[1].seq, 400).await.unwrap();
-    let left = store.pending_events(10).await.unwrap();
+    let left = finished_events(&store).await;
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].id, events[2].id, "the same id at every read");
     assert_eq!(store.forget_sent_events(now).await.unwrap(), 0);

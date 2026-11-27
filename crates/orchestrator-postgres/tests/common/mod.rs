@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use engine_port::{Descriptor, RunKind, PORT};
 use orchestration_model::{EngineLine, EngineName, Line, OnInterrupt};
 use orchestrator_postgres::NewFlow;
-use serde_json::json;
+use serde_json::{json, Value};
 use sqlx::PgPool;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, ImageExt};
@@ -84,5 +84,25 @@ pub fn descriptor(engine: &str, line: &str) -> Descriptor {
             parameters: json!({"type": "object"}),
         }],
         concurrency: 2,
+    }
+}
+
+/// The module's schema `file` for the event: every required key is there,
+/// every key is a property, and an enum's value is one of its values.
+pub fn fits_the_schema(file: &str, data: &Value) {
+    let path = format!(
+        "{}/../../modules/orchestrator/events/{file}",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let schema: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let properties = schema["properties"].as_object().unwrap();
+    for key in schema["required"].as_array().unwrap() {
+        assert!(data.get(key.as_str().unwrap()).is_some(), "{key} missing");
+    }
+    for (key, value) in data.as_object().unwrap() {
+        let property = properties.get(key).unwrap_or_else(|| panic!("{key}"));
+        if let Some(values) = property.get("enum") {
+            assert!(values.as_array().unwrap().contains(value), "{key}");
+        }
     }
 }

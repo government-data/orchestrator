@@ -15,11 +15,18 @@ provides:
       protocols: [engine-port/1]
       properties:
         token-audience: orchestrator
-  # Every end of a run, whatever ends it (the outbox, decision 0017).
+  # Through the outbox (decision 0017): a run's claim, every end of a run
+  # whatever ends it, and a chain's end.
   events:
+    - topic: orchestrator.run.started
+      version: 1
+      schema: events/run-started.v1.json
     - topic: orchestrator.run.finished
       version: 1
       schema: events/run-finished.v1.json
+    - topic: orchestrator.chain.finished
+      version: 1
+      schema: events/chain-finished.v1.json
 
 # The people's cached actions are dropped when the core's IAM changes.
 consumes:
