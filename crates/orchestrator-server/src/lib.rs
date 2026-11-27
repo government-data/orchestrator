@@ -24,6 +24,7 @@ mod removal;
 mod scan;
 mod scheduler;
 mod sealer;
+mod serve;
 mod settings;
 mod token;
 
@@ -56,6 +57,7 @@ pub use removal::{removal, RemovalAnswer, ORCHESTRATOR_MODULE};
 pub use scan::ScanAsked;
 pub use scheduler::{Scheduler, Tick, RUNNERS_FENCE};
 pub use sealer::{NotOpened, Sealer};
+pub use serve::{serve, stop_signal, Every, INTERNAL_ROUTE, WEB_ROUTE};
 pub use settings::{machine_dir, machine_http, Settings};
 pub use token::{ed25519_keys, module_of, Expected, InternalCaller, JwksKeys, KeyList, Keys};
 
