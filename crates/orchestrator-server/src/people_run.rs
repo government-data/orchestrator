@@ -64,7 +64,11 @@ async fn run_now<C: Clock>(
     if !flow.enabled {
         return error(StatusCode::CONFLICT, "the flow is disabled");
     }
-    if s.port.core_flow.as_deref() == Some(flow.id.as_str()) {
+    let core_flow = match s.port.store.core_flow().await {
+        Ok(id) => id,
+        Err(e) => return failed(&e),
+    };
+    if core_flow.as_deref() == Some(flow.id.as_str()) {
         return error(StatusCode::CONFLICT, "the core starts this flow's runs");
     }
     match s

@@ -58,11 +58,11 @@ async fn send(
     )
 }
 
-fn app(h: &common::Harness, flow: Option<&str>) -> Core {
-    let mut port = EnginePort::new(h.store.clone(), h.clock.clone());
+async fn app(h: &common::Harness, flow: Option<&str>) -> Core {
     if let Some(flow) = flow {
-        port = port.with_core_flow(flow.to_string());
+        h.store.set_core_flow(flow).await.unwrap();
     }
+    let port = EnginePort::new(h.store.clone(), h.clock.clone());
     let key = CoreKey::new();
     let app = chains_router(Arc::new(PortState {
         port,
@@ -91,7 +91,7 @@ async fn the_core_starts_one_chain_per_job_and_its_first_step_runs() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("quality").await;
-    let app = app(&h, Some(&flow.id));
+    let app = app(&h, Some(&flow.id)).await;
 
     let (status, started) = ask(&app, CORE, &tables_job()).await;
     assert_eq!(status, StatusCode::CREATED, "{started}");
@@ -114,7 +114,7 @@ async fn only_the_cores_machine_with_its_token_starts_a_chain() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("quality").await;
-    let core = app(&h, Some(&flow.id));
+    let core = app(&h, Some(&flow.id)).await;
     let (status, _) = ask(&core, WORKER, &tables_job()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "another machine");
     let (status, _) = ask(&core, "garbage", &tables_job()).await;
@@ -139,7 +139,7 @@ async fn malformed_requests_are_refused_and_start_nothing() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("quality").await;
-    let app = app(&h, Some(&flow.id));
+    let app = app(&h, Some(&flow.id)).await;
     let mut bad_id = tables_job();
     bad_id["job_id"] = json!("a/b");
     let mut no_steps = tables_job();
@@ -159,6 +159,6 @@ async fn malformed_requests_are_refused_and_start_nothing() {
 #[tokio::test]
 async fn with_no_flow_for_the_cores_chains_none_starts() {
     let h = harness().await;
-    let (status, _) = ask(&app(&h, None), CORE, &tables_job()).await;
+    let (status, _) = ask(&app(&h, None).await, CORE, &tables_job()).await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
 }

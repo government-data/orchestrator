@@ -38,14 +38,15 @@ pub struct FlowEdit {
     pub enabled: Option<bool>,
 }
 
-const FLOW_COLUMNS: &str = "id::text, folder_id::text, name, description, engine, line, kind,
+pub(crate) const FLOW_COLUMNS: &str =
+    "id::text, folder_id::text, name, description, engine, line, kind,
     cluster, parameters, timeout_secs, allow_overlap, on_interrupt, paused_at, enabled";
 
 pub(crate) fn secs(raw: i32) -> Result<u32, StoreError> {
     u32::try_from(raw).map_err(|_| corrupt("a negative number of seconds"))
 }
 
-fn flow(r: &PgRow) -> Result<Flow, StoreError> {
+pub(crate) fn flow(r: &PgRow) -> Result<Flow, StoreError> {
     let on_interrupt: Option<String> = r.try_get("on_interrupt")?;
     Ok(Flow {
         id: r.try_get("id")?,

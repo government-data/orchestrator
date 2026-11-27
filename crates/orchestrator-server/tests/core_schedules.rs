@@ -67,10 +67,11 @@ async fn a_core_schedule_fires_the_chain_the_core_says() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("quality").await;
+    h.store.set_core_flow(&flow.id).await.unwrap();
     let core = Arc::new(FakeCore::default());
     *core.schedules.lock().unwrap() = Some(hourly(true));
-    let scheduler = Scheduler::new(h.store.clone(), h.clock.clone())
-        .with_core_schedules(core.clone(), flow.id.clone());
+    let scheduler =
+        Scheduler::new(h.store.clone(), h.clock.clone()).with_core_schedules(core.clone());
 
     let tick = scheduler.tick().await.unwrap();
     assert_eq!((tick.queued, tick.chained), (0, 0), "kept, due at 11:00");
@@ -108,11 +109,12 @@ async fn an_empty_chain_runs_nothing_and_a_dropped_schedule_stops() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("quality").await;
+    h.store.set_core_flow(&flow.id).await.unwrap();
     let core = Arc::new(FakeCore::default());
     *core.schedules.lock().unwrap() = Some(hourly(true));
     *core.steps.lock().unwrap() = Some(Vec::new());
-    let scheduler = Scheduler::new(h.store.clone(), h.clock.clone())
-        .with_core_schedules(core.clone(), flow.id.clone());
+    let scheduler =
+        Scheduler::new(h.store.clone(), h.clock.clone()).with_core_schedules(core.clone());
     scheduler.tick().await.unwrap();
     h.clock.advance(Duration::hours(1) + Duration::seconds(5));
     assert_eq!(scheduler.tick().await.unwrap().queued, 0, "a blocked cut");
