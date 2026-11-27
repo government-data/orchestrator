@@ -12,6 +12,7 @@
 //! | `POST /internal/runs/{id}/finish` | [`Finish`] | 204 |
 //! | `POST /internal/runs/{id}/locks` | [`Lock`] | [`LockAnswer`] |
 //! | `POST /internal/runs/{id}/locks/release` | [`Lock`] | 204 |
+//! | `PUT /internal/engines/{engine}/{line}/pools` | [`Pools`] | 204 |
 //! | `POST /internal/engines/{engine}/hold` | [`Hold`] | [`HoldAnswer`] |
 //! | `POST /internal/engines/{engine}/release` | [`Release`] | 204 |
 //! | `PUT /internal/engines/{engine}/{line}/found` | [`Found`] | [`FoundAnswer`] |
@@ -24,6 +25,7 @@ mod descriptor;
 mod found;
 mod inventory;
 mod locks;
+mod pools;
 mod runs;
 mod schema;
 
@@ -41,6 +43,7 @@ pub use inventory::{
     RECORD_FILE, RECORD_FORMAT,
 };
 pub use locks::{is_lock_name, Lock, LockAnswer, MAX_LOCK_NAME_BYTES};
+pub use pools::{Pools, SlotPool, MAX_POOLS, MAX_POOL_SIZE};
 pub use runs::{
     Claim, Claimed, Finish, Hold, HoldAnswer, HoldState, LogLine, LogStream, Logs, Progress,
     Release, Renew, RenewAction, Renewed, Resume, MAX_COUNTS, MAX_LOG_LINES, MAX_LOG_LINE_BYTES,
