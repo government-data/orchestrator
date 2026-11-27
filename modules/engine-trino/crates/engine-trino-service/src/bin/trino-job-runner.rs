@@ -8,12 +8,13 @@
 //! secret file, `QD_MACHINE_DIR` (default `/run/qd-node`),
 //! `RUNNER_CONCURRENCY` (default 1), `RUNNER_NAME` (default the host name),
 //! `QD_WORKER_MIN_FREE_BYTES` and `QD_WORKER_MIN_FREE_MEMORY_PCT` (the
-//! guard's minimums).
+//! guard's minimums), `QD_METRICS_DIR` (where its metrics file
+//! `engine-trino.prom` goes, `off` for none).
 
 use std::path::Path;
 use std::time::Duration;
 
-use engine_runner::{HttpOrchestrator, Runner};
+use engine_runner::{metrics_file, Engine, HttpOrchestrator, Runner, RunnerMetrics};
 use engine_trino_service::{core_from_env, machine_client, setting, setting_or, ClientTrino};
 use trino_client::TrinoClient;
 use trino_runner::TrinoEngine;
@@ -40,6 +41,11 @@ async fn run() -> Result<(), String> {
         &setting("TRINO_VERSION")?,
         concurrency,
     );
+    let mut registry = prometheus_client::registry::Registry::default();
+    let metrics = RunnerMetrics::register(&engine.descriptor(), &mut registry);
+    if let Some(file) = metrics_file("engine-trino", registry) {
+        file.spawn();
+    }
     let orchestrator = HttpOrchestrator::new(client, &setting("ORCHESTRATOR_URL")?);
     let name = setting_or("RUNNER_NAME", &setting_or("HOSTNAME", "runner"));
     let runner = Runner::new(
@@ -47,7 +53,8 @@ async fn run() -> Result<(), String> {
         orchestrator,
         engine_trino_service::guard::from_env()?,
         &name,
-    );
+    )
+    .with_metrics(metrics);
     while let Err(e) = runner.register().await {
         tracing::warn!(error = %e, "registration refused or unreachable; again in 10 s");
         tokio::time::sleep(Duration::from_secs(10)).await;

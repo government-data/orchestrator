@@ -28,6 +28,7 @@ sha2.workspace = true
 
 [dev-dependencies]
 base64.workspace = true
+prometheus-client.workspace = true
 ring.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

@@ -155,6 +155,7 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
             guard: Arc::clone(&self.guard),
             renew_every: self.renew_every,
             scan: Arc::clone(&self.scan),
+            metrics: self.metrics.clone(),
         };
         let metrics = self.metrics.clone();
         let slots = Arc::clone(&self.slots);
@@ -180,6 +181,7 @@ struct Drive<E, O, G> {
     guard: Arc<G>,
     renew_every: Duration,
     scan: Arc<Notify>,
+    metrics: Option<Arc<RunnerMetrics>>,
 }
 
 /// Why the runner stopped the engine itself.
@@ -201,7 +203,10 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
                 )
                 .await;
         }
-        let ctx = RunContext::default();
+        let ctx = RunContext {
+            timing: self.metrics.clone().map(|m| (m, run.kind.clone())),
+            ..RunContext::default()
+        };
         let deadline = Instant::now() + Duration::from_secs(u64::from(run.timeout_secs));
         let engine = Arc::clone(&self.engine);
         let mut work = tokio::spawn(engine_run(engine, run.clone(), ctx.clone()));

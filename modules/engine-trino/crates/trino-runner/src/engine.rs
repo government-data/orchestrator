@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use engine_port::{Claimed, Descriptor, RunKind, PORT};
@@ -187,6 +187,11 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         };
         // The core's job is the operator's run (core decision 0090, step 18).
         let job = run.run.clone();
+        let mut clock = Instant::now();
+        let mut lap = |stage: &'static str| {
+            ctx.timed(stage, clock.elapsed());
+            clock = Instant::now();
+        };
         let signed = match self.core.bundle(&job, &request).await {
             Ok(b) => b,
             Err(_) => return transient("core_unavailable"),
@@ -196,16 +201,21 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             Ok(_) => return Outcome::failed("bundle_invalid"),
             Err(o) => return o,
         };
+        lap("bundle");
         let Ok(token) = self.core.token(&job, user).await else {
             return transient("core_unavailable");
         };
+        lap("token");
         self.running
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .entry(run.run.clone())
             .and_modify(|e| e.0.clone_from(&token));
-        if let Err(o) = self.end_previous(run, &token).await {
-            return o;
+        if run.resume.as_ref().is_some_and(|r| r.engine_ref.is_some()) {
+            if let Err(o) = self.end_previous(run, &token).await {
+                return o;
+            }
+            lap("previous_query");
         }
         let (from, known) =
             Known::parse(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
@@ -214,10 +224,13 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             o = self.statements(&job, &bundle, (from, known), &token, ctx, &mut trail) => o,
             () = cancel.notified() => return Outcome::cancelled(),
         };
-        match trail.report(&signed.digest, &outcome) {
-            Some(report) => self.deliver(&job, &report, outcome, ctx).await,
-            None => outcome,
-        }
+        let Some(report) = trail.report(&signed.digest, &outcome) else {
+            return outcome;
+        };
+        let clock = Instant::now();
+        let outcome = self.deliver(&job, &report, outcome, ctx).await;
+        ctx.timed("report", clock.elapsed());
+        outcome
     }
 }
 

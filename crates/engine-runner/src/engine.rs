@@ -12,6 +12,8 @@ use engine_port::{
 use orchestration_model::{FinalState, Interruption};
 use tokio::sync::Notify;
 
+use crate::RunnerMetrics;
+
 /// A run the engine refuses before it starts (its parameters do not fit
 /// its kind): it ends `failed` with this class.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +122,8 @@ pub(crate) struct Reported {
 pub struct RunContext {
     pub(crate) state: Arc<Mutex<Reported>>,
     pub(crate) wake: Arc<Notify>,
+    /// The runner's metrics and the run's kind, for its stages' times.
+    pub(crate) timing: Option<(Arc<RunnerMetrics>, String)>,
 }
 
 impl RunContext {
@@ -152,6 +156,14 @@ impl RunContext {
                 detail: detail.map(str::to_string),
             });
         });
+    }
+
+    /// A stage of the run (a name the engine fixes) took `took`: counted in
+    /// the runner's metrics, if it has them.
+    pub fn timed(&self, stage: &'static str, took: std::time::Duration) {
+        if let Some((metrics, kind)) = &self.timing {
+            metrics.stage(kind, stage, took);
+        }
     }
 
     /// The engine's own reference of the run (a query id): sent before the
