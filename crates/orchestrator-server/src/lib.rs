@@ -21,6 +21,7 @@ mod metrics;
 mod modules;
 mod outbox;
 mod people;
+mod people_flows;
 mod people_http;
 mod people_run;
 mod people_runs;

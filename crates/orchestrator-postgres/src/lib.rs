@@ -29,7 +29,7 @@ pub use chains::{ChainsMoved, NewChain};
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use drain::DrainCounts;
 pub use engines::{LiveRunners, RegisteredEngine};
-pub use flows::NewFlow;
+pub use flows::{FlowEdit, NewFlow};
 pub use found::ScanAsked;
 pub use import::{ImportRefused, Imported, NewImport};
 pub use outbox::OutboxEvent;

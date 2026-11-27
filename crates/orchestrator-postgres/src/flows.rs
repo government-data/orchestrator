@@ -23,6 +23,21 @@ pub struct NewFlow {
     pub on_interrupt: Option<OnInterrupt>,
 }
 
+/// A flow's edit: each field given replaces the flow's; engine, line,
+/// kind and cluster stay (they name where its artefact is).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FlowEdit {
+    pub folder_id: Option<String>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub parameters: Option<Value>,
+    pub timeout_secs: Option<u32>,
+    pub allow_overlap: Option<bool>,
+    /// `Some(None)`: the installation's rule.
+    pub on_interrupt: Option<Option<OnInterrupt>>,
+    pub enabled: Option<bool>,
+}
+
 const FLOW_COLUMNS: &str = "id::text, folder_id::text, name, description, engine, line, kind,
     cluster, parameters, timeout_secs, allow_overlap, on_interrupt, paused_at, enabled";
 
@@ -148,5 +163,33 @@ impl PgStore {
                 .execute(&self.pool)
                 .await?;
         Ok(done.rows_affected() == 1)
+    }
+
+    /// Edits a flow; `None` if it does not exist.
+    pub async fn update_flow(&self, id: &str, e: &FlowEdit) -> Result<Option<Flow>, StoreError> {
+        let sql = format!(
+            "UPDATE flows SET folder_id = COALESCE($2::uuid, folder_id),
+                    name = COALESCE($3, name), description = COALESCE($4, description),
+                    parameters = COALESCE($5, parameters),
+                    timeout_secs = COALESCE($6, timeout_secs),
+                    allow_overlap = COALESCE($7, allow_overlap),
+                    on_interrupt = CASE WHEN $8 THEN $9 ELSE on_interrupt END,
+                    enabled = COALESCE($10, enabled), updated_at = now()
+              WHERE id = $1::uuid RETURNING {FLOW_COLUMNS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .bind(&e.folder_id)
+            .bind(&e.name)
+            .bind(&e.description)
+            .bind(&e.parameters)
+            .bind(e.timeout_secs.map(signed).transpose()?)
+            .bind(e.allow_overlap)
+            .bind(e.on_interrupt.is_some())
+            .bind(e.on_interrupt.flatten().map(OnInterrupt::as_str))
+            .bind(e.enabled)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(flow).transpose()
     }
 }

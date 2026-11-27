@@ -26,7 +26,10 @@ pub(crate) fn routes<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
     Router::new()
         .route("/api/v1/folders", get(folders::<C>))
         .route("/api/v1/flows", get(flows::<C>))
-        .route("/api/v1/flows/{id}", get(flow::<C>))
+        .route(
+            "/api/v1/flows/{id}",
+            get(flow::<C>).patch(crate::people_flows::edit_flow::<C>),
+        )
         .with_state(state)
 }
 
