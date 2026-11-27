@@ -1,14 +1,17 @@
 //! The server binary's wiring (decision 0011, steps 7 and 8): the
 //! migrations, then on one listener
 //!
-//! - the engine port and the core's calls on the module's route of the
-//!   `internal` entry point, served both at `/internal/…` and under the
+//! - the engine port and the core's calls (the drain, the removal and,
+//!   with a flow for the core's chains, `POST /internal/chains` from the
+//!   core's machine alone) on the module's route of the `internal` entry
+//!   point, served both at `/internal/…` and under the
 //!   route prefix `/modules/orchestrator` (quality-sdk decision 0002), so
 //!   they answer whether or not Traefik strips it;
 //! - the people's API under the web route (`/orchestrator/api/v1/…`),
 //!   which Traefik passes as is;
 //!
-//! and beside them the scheduler, the outbox sender, the watch of
+//! and beside them the scheduler (keeping and firing the core's schedules
+//! when that flow is set), the outbox sender, the watch of
 //! `core.iam.changed` and the metrics file. The engine port and the
 //! people's API are not reachable from each other's entry point: the web
 //! route passes only `/orchestrator/…`.
@@ -24,10 +27,11 @@ use orchestrator_postgres::PgStore;
 use tokio::task::JoinSet;
 
 use crate::{
-    core_router, counted, people_router, router, send_outbox, watch_iam_changes, CachedActions,
-    Clock, CoreEvents, CoreToken, EnginePort, Expected, HttpEffectiveActions, HttpEvents,
-    HttpMachineList, HttpModuleList, InternalCaller, JwksKeys, Metrics, OidcPeople, People,
-    PeopleState, PortState, Scheduler, Settings, SystemClock, TraefikMachine, ORCHESTRATOR_MODULE,
+    chains_router, core_router, counted, people_router, router, send_outbox, watch_iam_changes,
+    CachedActions, Clock, CoreEvents, CoreMachine, CoreToken, EnginePort, Expected,
+    HttpCoreSchedules, HttpEffectiveActions, HttpEvents, HttpMachineList, HttpModuleList,
+    InternalCaller, JwksKeys, Metrics, OidcPeople, People, PeopleState, PortState, Scheduler,
+    Settings, SystemClock, TraefikMachine, ORCHESTRATOR_MODULE,
 };
 
 /// The web route people reach the orchestrator by (its manifest's
@@ -85,7 +89,7 @@ pub async fn serve(
     let events: Arc<dyn CoreEvents> =
         Arc::new(HttpEvents::new(http.clone(), base, Arc::clone(&token)));
     let people = people(&http, &settings, actions.clone());
-    let port = EnginePort::new(store.clone(), SystemClock)
+    let mut port = EnginePort::new(store.clone(), SystemClock)
         .with_machines(Arc::new(HttpMachineList::new(
             http.clone(),
             base,
@@ -93,15 +97,26 @@ pub async fn serve(
         )))
         .with_sealer(Arc::new(settings.sealer))
         .with_metrics(Arc::clone(&metrics));
+    let mut scheduler = Scheduler::new(store.clone(), SystemClock)
+        .with_modules(Arc::new(HttpModuleList::new(
+            http.clone(),
+            base,
+            Arc::clone(&token),
+        )))
+        .with_metrics(Arc::clone(&metrics));
+    if let Some(flow) = settings.core_flow {
+        let schedules = HttpCoreSchedules::new(http.clone(), base, token);
+        scheduler = scheduler.with_core_schedules(Arc::new(schedules), flow.clone());
+        port = port.with_core_flow(flow);
+    } else {
+        tracing::warn!("no ORCHESTRATOR_CORE_FLOW: the core's schedules and chains wait");
+    }
     let engines = InternalCaller::new(
         JwksKeys::new(http.clone(), &settings.issuer),
         expected(&settings.issuer, ORCHESTRATOR_MODULE),
         SystemClock,
     );
-    let app = app(&port, Arc::new(engines), people, Arc::clone(&metrics));
-    let scheduler = Scheduler::new(store.clone(), SystemClock)
-        .with_modules(Arc::new(HttpModuleList::new(http.clone(), base, token)))
-        .with_metrics(metrics);
+    let app = app(&port, Arc::new(engines), people, metrics);
 
     let mut loops = JoinSet::new();
     loops.spawn(ticks(scheduler, every.tick));
@@ -155,7 +170,7 @@ fn people(
 
 /// Every route on one router: the engine port (`engines` reads the
 /// machine and the engine module's token), the core's calls (the machine
-/// alone) and the people's API, counted by route template.
+/// alone; a chain, the core's machine alone) and the people's API, counted by route template.
 fn app<C: Clock + Clone>(
     port: &EnginePort<C>,
     engines: Arc<dyn crate::Authenticate>,
@@ -170,7 +185,13 @@ fn app<C: Clock + Clone>(
         port: port.clone(),
         auth: Arc::new(TraefikMachine),
     });
-    let internal = router(engine_state).merge(core_router(core_state));
+    let chains_state = Arc::new(PortState {
+        port: port.clone(),
+        auth: Arc::new(CoreMachine),
+    });
+    let internal = router(engine_state)
+        .merge(core_router(core_state))
+        .merge(chains_router(chains_state));
     let people = people_router(Arc::new(PeopleState {
         port: port.clone(),
         people,

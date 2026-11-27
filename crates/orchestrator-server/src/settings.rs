@@ -10,6 +10,7 @@
 //! | the machine's certificate | `QD_MACHINE_DIR` (`/run/qd-node`): `ca.crt`, `machine.pem` |
 //! | the sealing key | `QD_SEALING_KEY_FILE` (`/run/secrets/sealing-key`) |
 //! | where it listens | `ORCHESTRATOR_LISTEN` (`0.0.0.0:8080`) |
+//! | the flow the core's chains run on | `ORCHESTRATOR_CORE_FLOW` (a flow's id; unset: the core's schedules are not kept and its chains not started) |
 //!
 //! No secret is kept in a `Debug` or an error.
 
@@ -32,6 +33,8 @@ pub struct Settings {
     pub core_base: String,
     pub sealer: Sealer,
     pub listen: SocketAddr,
+    /// The flow the core's schedules fire on and its chains start on.
+    pub core_flow: Option<String>,
 }
 
 impl std::fmt::Debug for Settings {
@@ -40,6 +43,7 @@ impl std::fmt::Debug for Settings {
             .field("issuer", &self.issuer)
             .field("core_base", &self.core_base)
             .field("listen", &self.listen)
+            .field("core_flow", &self.core_flow)
             .finish_non_exhaustive()
     }
 }
@@ -114,8 +118,19 @@ impl Settings {
             listen: setting_or("ORCHESTRATOR_LISTEN", "0.0.0.0:8080")
                 .parse()
                 .map_err(|_| "ORCHESTRATOR_LISTEN: an address and port".to_string())?,
+            core_flow: core_flow()?,
         })
     }
+}
+
+/// `ORCHESTRATOR_CORE_FLOW`, a flow's id, when set.
+fn core_flow() -> Result<Option<String>, String> {
+    let Ok(flow) = setting("ORCHESTRATOR_CORE_FLOW") else {
+        return Ok(None);
+    };
+    uuid::Uuid::parse_str(&flow)
+        .map(|id| Some(id.to_string()))
+        .map_err(|_| "ORCHESTRATOR_CORE_FLOW: a flow's id".to_string())
 }
 
 /// An HTTP client that presents the machine's certificate (`machine.pem`:
@@ -182,6 +197,18 @@ mod tests {
             !shown.contains("secret-1") && !shown.contains("password-1"),
             "{shown}"
         );
+        assert_eq!(s.core_flow, None);
+        let flow = "0b9d6a52-2f5e-4c1e-9d8a-1f2e3d4c5b6a";
+        std::env::set_var("ORCHESTRATOR_CORE_FLOW", flow);
+        assert_eq!(
+            Settings::from_env().unwrap().core_flow.as_deref(),
+            Some(flow)
+        );
+        std::env::set_var("ORCHESTRATOR_CORE_FLOW", "daily");
+        assert!(Settings::from_env()
+            .unwrap_err()
+            .contains("ORCHESTRATOR_CORE_FLOW"));
+        std::env::remove_var("ORCHESTRATOR_CORE_FLOW");
         std::env::set_var("QD_DB_SSLMODE", "prefer-not");
         assert!(Settings::from_env().unwrap_err().contains("QD_DB_SSLMODE"));
         for (k, _) in &vars {

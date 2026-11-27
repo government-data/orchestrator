@@ -106,6 +106,7 @@ fn settings(db_port: u16, core: &str, listen: std::net::SocketAddr) -> Settings 
         core_base: core.into(),
         sealer: Sealer::from_file_content("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA").unwrap(),
         listen,
+        core_flow: None,
     }
 }
 
@@ -209,6 +210,16 @@ async fn the_server_starts_serves_and_stops() {
         res.status(),
         401,
         "the engine port wants an engine module's token"
+    );
+    let chains = http
+        .post(format!("{base}/modules/orchestrator/internal/chains"))
+        .header("x-forwarded-tls-client-cert-info", MASTER)
+        .json(&json!({"job_id": "j-1", "steps": [{"kind": "tables"}]}));
+    let res = chains.send().await.unwrap();
+    assert_eq!(
+        res.status(),
+        503,
+        "the core's machine; no flow for its chains"
     );
     let found = format!("{base}/orchestrator/api/v1/found?machine=m&engine=e&line=-");
     assert_eq!(get_status(&http, &found).await, Some(401), "not signed in");
