@@ -12,7 +12,8 @@ use engine_port::{
 use orchestration_model::{FinalState, Interruption};
 use tokio::sync::Notify;
 
-use crate::RunnerMetrics;
+use crate::client::RunLocks;
+use crate::{CallError, RunnerMetrics};
 
 /// A run the engine refuses before it starts (its parameters do not fit
 /// its kind): it ends `failed` with this class.
@@ -124,6 +125,8 @@ pub struct RunContext {
     pub(crate) wake: Arc<Notify>,
     /// The runner's metrics and the run's kind, for its stages' times.
     pub(crate) timing: Option<(Arc<RunnerMetrics>, String)>,
+    /// The run's locks at the orchestrator, under its lease.
+    pub(crate) locks: Option<Arc<dyn RunLocks>>,
 }
 
 impl RunContext {
@@ -156,6 +159,25 @@ impl RunContext {
                 detail: detail.map(str::to_string),
             });
         });
+    }
+
+    /// Takes the lock `name` for this run (core decision 0090, point
+    /// 6.2.4: one writer per table): `false` while another running run
+    /// holds it, so ask again later. It is the run's until
+    /// [`RunContext::unlock`] or the run's end.
+    pub async fn lock(&self, name: &str) -> Result<bool, CallError> {
+        match &self.locks {
+            Some(l) => l.take(name).await,
+            None => Err(CallError::Refused(404, "no run to lock for".into())),
+        }
+    }
+
+    /// Gives the lock `name` back.
+    pub async fn unlock(&self, name: &str) -> Result<(), CallError> {
+        match &self.locks {
+            Some(l) => l.give_back(name).await,
+            None => Err(CallError::Refused(404, "no run to lock for".into())),
+        }
     }
 
     /// A stage of the run (a name the engine fixes) took `took`: counted in

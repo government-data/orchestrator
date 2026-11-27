@@ -129,6 +129,12 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
         self.orchestrator.register(&self.descriptor).await
     }
 
+    /// Sends the engine's slot pools (core decision 0090, point 6.3), from
+    /// its own configuration; call after [`Runner::register`].
+    pub async fn send_pools(&self, pools: &engine_port::Pools) -> Result<(), CallError> {
+        self.orchestrator.set_pools(&self.descriptor, pools).await
+    }
+
     /// Claims one run if a slot is free and the guard allows it, and drives
     /// it in a task; `None` when there was nothing to take.
     pub async fn claim_once(&self) -> Result<Option<JoinHandle<Ended>>, CallError> {
@@ -205,6 +211,11 @@ impl<E: Engine, O: Orchestrator, G: Guard> Drive<E, O, G> {
         }
         let ctx = RunContext {
             timing: self.metrics.clone().map(|m| (m, run.kind.clone())),
+            locks: Some(Arc::new(crate::client::LeasedLocks {
+                orchestrator: Arc::clone(&self.orchestrator),
+                run: run.run.clone(),
+                lease: run.lease.clone(),
+            })),
             ..RunContext::default()
         };
         let deadline = Instant::now() + Duration::from_secs(u64::from(run.timeout_secs));

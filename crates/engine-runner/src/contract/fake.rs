@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use engine_port::{
     Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, FolderRecord, Found,
-    FoundAnswer, Inventory, InventoryAnswer, LogLine, Logs, Registered, Renew, RenewAction,
-    Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
+    FoundAnswer, Inventory, InventoryAnswer, Lock, LockAnswer, LogLine, Logs, Pools, Registered,
+    Renew, RenewAction, Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
 };
 use orchestration_model::RunState;
 use serde_json::Value;
@@ -58,6 +58,9 @@ struct State {
     adopted: bool,
     /// A scan was asked: renewals say so until the next found report.
     scan: bool,
+    /// Each taken lock's run: free once that run no longer runs.
+    locks: BTreeMap<String, String>,
+    pools: Option<Pools>,
 }
 
 /// The fake orchestrator; clones share one state.
@@ -73,6 +76,23 @@ impl FakeOrchestrator {
     fn with<T>(&self, f: impl FnOnce(&mut State) -> T) -> T {
         let mut guard = self.state.lock().unwrap_or_else(|e| e.into_inner());
         f(&mut guard)
+    }
+
+    /// The running run that holds the lock `name`, if one does.
+    #[must_use]
+    pub fn lock_holder(&self, name: &str) -> Option<String> {
+        self.with(|s| Self::holder(s, name))
+    }
+
+    /// The pools the engine sent last.
+    #[must_use]
+    pub fn pools(&self) -> Option<Pools> {
+        self.with(|s| s.pools.clone())
+    }
+
+    fn holder(s: &State, name: &str) -> Option<String> {
+        let run = s.locks.get(name)?;
+        (s.runs.get(run)?.state == RunState::Running).then(|| run.clone())
     }
 
     /// Queues a run of `kind`, its first attempt; its id.
@@ -364,6 +384,47 @@ impl Orchestrator for FakeOrchestrator {
                 _ => Err(CallError::Lease),
             }
         })
+    }
+
+    async fn take_lock(&self, run: &str, l: &Lock) -> Result<LockAnswer, CallError> {
+        l.validate()
+            .map_err(|e| CallError::Refused(422, e.to_string()))?;
+        self.with(|s| {
+            Self::leased(s, run, &l.lease)?;
+            let granted = Self::holder(s, &l.name).is_none_or(|holder| holder == run);
+            if granted {
+                s.locks.insert(l.name.clone(), run.to_string());
+            }
+            Ok(LockAnswer { granted })
+        })
+    }
+
+    async fn release_lock(&self, run: &str, l: &Lock) -> Result<(), CallError> {
+        self.with(|s| {
+            Self::leased(s, run, &l.lease)?;
+            if s.locks.get(&l.name).is_some_and(|holder| holder == run) {
+                s.locks.remove(&l.name);
+            }
+            Ok(())
+        })
+    }
+
+    async fn set_pools(&self, d: &Descriptor, p: &Pools) -> Result<(), CallError> {
+        p.validate()
+            .map_err(|e| CallError::Refused(422, e.to_string()))?;
+        if let Some(k) = p
+            .pools
+            .iter()
+            .flat_map(|p| &p.kinds)
+            .find(|k| d.kind(k).is_none())
+        {
+            return Err(CallError::Refused(
+                422,
+                format!("kind {k:?} is not the engine's"),
+            ));
+        }
+        self.with(|s| s.pools = Some(p.clone()));
+        Ok(())
     }
 }
 
