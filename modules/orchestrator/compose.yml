@@ -21,7 +21,8 @@
 # certificate) and CORE_URL (the core's internal entry point on 443:
 # https://<QD_CORE_NAME>/api). Optional: QD_DB_SSLMODE (verify-full);
 # ORCHESTRATOR_CORE_FLOW, the id of the flow the core's schedules fire on
-# and its chains start on (unset: neither runs).
+# and its chains start on (unset: the flow the core makes through
+# /internal/core-flow, kept in the database).
 #
 # The master's name resolves to the host (host-gateway), where the core's
 # Traefik passes it on 443 by SNI.
