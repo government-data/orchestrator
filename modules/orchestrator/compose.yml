@@ -19,7 +19,9 @@
 # QD_DB_* and QD_OIDC_*; QD_MACHINE_DIR (the master's machine certificate:
 # ca.crt, machine.pem); QD_CORE_NAME (the master's machine name, as in its
 # certificate) and CORE_URL (the core's internal entry point on 443:
-# https://<QD_CORE_NAME>/api). Optional: QD_DB_SSLMODE (verify-full).
+# https://<QD_CORE_NAME>/api). Optional: QD_DB_SSLMODE (verify-full);
+# ORCHESTRATOR_CORE_FLOW, the id of the flow the core's schedules fire on
+# and its chains start on (unset: neither runs).
 #
 # The master's name resolves to the host (host-gateway), where the core's
 # Traefik passes it on 443 by SNI.
@@ -75,6 +77,7 @@ services:
       QD_OIDC_PEOPLE_CLIENT_ID: ${QD_OIDC_PEOPLE_CLIENT_ID:?}
       QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
       CORE_URL: ${CORE_URL:?}
+      ORCHESTRATOR_CORE_FLOW: ${ORCHESTRATOR_CORE_FLOW:-}
       QD_METRICS_DIR: /run/qd-metrics
     extra_hosts: ["${QD_CORE_NAME:?}:host-gateway"]
     volumes:
