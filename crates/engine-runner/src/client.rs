@@ -1,9 +1,11 @@
 //! The orchestrator, as a runner calls it: the engine port over HTTP.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use engine_port::{
     Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, Found, FoundAnswer, Inventory,
-    InventoryAnswer, Logs, Registered, Renew, Renewed,
+    InventoryAnswer, Lock, LockAnswer, Logs, Pools, Registered, Renew, Renewed,
 };
 use reqwest::StatusCode;
 
@@ -52,6 +54,71 @@ pub trait Orchestrator: Send + Sync + 'static {
     ) -> Result<Option<DeployClaimed>, CallError>;
     /// A deploy's end; the same end again changes nothing.
     async fn finish_deploy(&self, deploy: &str, f: &DeployFinish) -> Result<(), CallError>;
+
+    /// Takes a lock for a running run (core decision 0090, point 6.2.4).
+    /// An orchestrator that does not serve locks refuses it.
+    async fn take_lock(&self, run: &str, l: &Lock) -> Result<LockAnswer, CallError> {
+        let _ = (run, l);
+        Err(not_served())
+    }
+
+    /// Gives a run's lock back.
+    async fn release_lock(&self, run: &str, l: &Lock) -> Result<(), CallError> {
+        let _ = (run, l);
+        Err(not_served())
+    }
+
+    /// The engine's slot pools (core decision 0090, point 6.3); replaces
+    /// the last ones sent.
+    async fn set_pools(&self, d: &Descriptor, p: &Pools) -> Result<(), CallError> {
+        let _ = (d, p);
+        Err(not_served())
+    }
+}
+
+fn not_served() -> CallError {
+    CallError::Refused(404, "not served by this orchestrator".into())
+}
+
+/// A running run's locks, under its lease, for its [`crate::RunContext`].
+#[async_trait]
+pub(crate) trait RunLocks: Send + Sync + std::fmt::Debug {
+    async fn take(&self, name: &str) -> Result<bool, CallError>;
+    async fn give_back(&self, name: &str) -> Result<(), CallError>;
+}
+
+/// [`RunLocks`] through the orchestrator, with the run's id and lease.
+pub(crate) struct LeasedLocks<O> {
+    pub(crate) orchestrator: Arc<O>,
+    pub(crate) run: String,
+    pub(crate) lease: String,
+}
+
+impl<O> std::fmt::Debug for LeasedLocks<O> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LeasedLocks")
+            .field("run", &self.run)
+            .finish_non_exhaustive()
+    }
+}
+
+#[async_trait]
+impl<O: Orchestrator> RunLocks for LeasedLocks<O> {
+    async fn take(&self, name: &str) -> Result<bool, CallError> {
+        let l = Lock {
+            lease: self.lease.clone(),
+            name: name.to_string(),
+        };
+        Ok(self.orchestrator.take_lock(&self.run, &l).await?.granted)
+    }
+
+    async fn give_back(&self, name: &str) -> Result<(), CallError> {
+        let l = Lock {
+            lease: self.lease.clone(),
+            name: name.to_string(),
+        };
+        self.orchestrator.release_lock(&self.run, &l).await
+    }
 }
 
 /// The engine port over HTTP. The client carries the machine's identity
@@ -164,5 +231,20 @@ impl Orchestrator for HttpOrchestrator {
     async fn finish_deploy(&self, deploy: &str, f: &DeployFinish) -> Result<(), CallError> {
         let path = format!("/internal/deploys/{deploy}/finish");
         self.send(reqwest::Method::POST, &path, f).await.map(drop)
+    }
+
+    async fn take_lock(&self, run: &str, l: &Lock) -> Result<LockAnswer, CallError> {
+        let path = format!("/internal/runs/{run}/locks");
+        Self::json(self.send(reqwest::Method::POST, &path, l).await?).await
+    }
+
+    async fn release_lock(&self, run: &str, l: &Lock) -> Result<(), CallError> {
+        let path = format!("/internal/runs/{run}/locks/release");
+        self.send(reqwest::Method::POST, &path, l).await.map(drop)
+    }
+
+    async fn set_pools(&self, d: &Descriptor, p: &Pools) -> Result<(), CallError> {
+        let path = format!("{}/pools", engine_path(d));
+        self.send(reqwest::Method::PUT, &path, p).await.map(drop)
     }
 }
