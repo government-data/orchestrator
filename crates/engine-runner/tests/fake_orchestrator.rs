@@ -20,7 +20,12 @@ async fn another_lease_changes_nothing() {
     let d = FakeEngine::default().descriptor();
     let id = fake.queue(json!({"behave": "succeed"})).await;
     let claim = Claim { runner: "r".into() };
-    let claimed = fake.claim(&d, &claim).await.unwrap().expect("handed out");
+    let claimed = fake
+        .claim(&d, &claim)
+        .await
+        .unwrap()
+        .run()
+        .expect("handed out");
     assert_eq!(claimed.run, id);
     let stale = Finish {
         lease: "lease-other".into(),
@@ -31,7 +36,10 @@ async fn another_lease_changes_nothing() {
     };
     assert_eq!(fake.finish(&id, &stale).await, Err(CallError::Lease));
     assert_eq!(fake.state(&id).await, "running");
-    assert!(fake.claim(&d, &claim).await.unwrap().is_none(), "one claim");
+    assert!(
+        fake.claim(&d, &claim).await.unwrap().run().is_none(),
+        "one claim"
+    );
 }
 
 #[tokio::test]
@@ -40,10 +48,10 @@ async fn a_hold_stops_claims_and_renewals_say_held() {
     let d = FakeEngine::default().descriptor();
     let claim = Claim { runner: "r".into() };
     let first = fake.queue(json!({"behave": "wait"})).await;
-    let claimed = fake.claim(&d, &claim).await.unwrap().unwrap();
+    let claimed = fake.claim(&d, &claim).await.unwrap().run().unwrap();
     fake.hold(true);
     let _second = fake.queue(json!({"behave": "succeed"})).await;
-    assert!(fake.claim(&d, &claim).await.unwrap().is_none());
+    assert!(fake.claim(&d, &claim).await.unwrap().run().is_none());
     let renew = Renew {
         lease: claimed.lease,
         progress: None,
@@ -53,7 +61,7 @@ async fn a_hold_stops_claims_and_renewals_say_held() {
     assert_eq!(renewed.action, RenewAction::Held);
     assert_eq!(fake.run(&first).unwrap().engine_ref.as_deref(), Some("q-1"));
     fake.hold(false);
-    assert!(fake.claim(&d, &claim).await.unwrap().is_some());
+    assert!(fake.claim(&d, &claim).await.unwrap().run().is_some());
 }
 
 #[tokio::test]
@@ -69,4 +77,22 @@ async fn a_hold_stops_deploy_claims_too() {
     fake.hold(false);
     let again = fake.claim_deploy(&d, &claim).await.unwrap().unwrap();
     assert_eq!(again.deploy, id, "taken up again once released");
+}
+
+#[tokio::test]
+async fn an_empty_claim_says_scan_until_the_next_found_report() {
+    let fake = FakeOrchestrator::default();
+    let d = FakeEngine::default().descriptor();
+    let claim = Claim { runner: "r".into() };
+    let idle = fake.claim(&d, &claim).await.unwrap();
+    assert!(!idle.scan(), "nothing asked");
+    fake.request_scan();
+    fake.hold(true);
+    assert!(fake.claim(&d, &claim).await.unwrap().scan(), "held, too");
+    fake.hold(false);
+    assert!(fake.claim(&d, &claim).await.unwrap().scan(), "again");
+    Orchestrator::found(&fake, &d, &engine_port::Found::default())
+        .await
+        .unwrap();
+    assert!(!fake.claim(&d, &claim).await.unwrap().scan());
 }

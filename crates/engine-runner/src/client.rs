@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use engine_port::{
-    Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, Found, FoundAnswer, Inventory,
-    InventoryAnswer, Lock, LockAnswer, Logs, Pools, Registered, Renew, Renewed,
+    Claim, ClaimAnswer, DeployClaimed, DeployFinish, Descriptor, Finish, Found, FoundAnswer, Idle,
+    Inventory, InventoryAnswer, Lock, LockAnswer, Logs, Pools, Registered, Renew, Renewed,
 };
 use reqwest::StatusCode;
 
@@ -37,7 +37,8 @@ impl std::error::Error for CallError {}
 #[async_trait]
 pub trait Orchestrator: Send + Sync + 'static {
     async fn register(&self, d: &Descriptor) -> Result<Registered, CallError>;
-    async fn claim(&self, d: &Descriptor, c: &Claim) -> Result<Option<Claimed>, CallError>;
+    /// A run, or none: an empty answer may ask for a scan.
+    async fn claim(&self, d: &Descriptor, c: &Claim) -> Result<ClaimAnswer, CallError>;
     async fn renew(&self, run: &str, r: &Renew) -> Result<Renewed, CallError>;
     async fn logs(&self, run: &str, l: &Logs) -> Result<(), CallError>;
     async fn finish(&self, run: &str, f: &Finish) -> Result<(), CallError>;
@@ -181,13 +182,13 @@ impl Orchestrator for HttpOrchestrator {
         Self::json(self.send(reqwest::Method::PUT, &engine_path(d), d).await?).await
     }
 
-    async fn claim(&self, d: &Descriptor, c: &Claim) -> Result<Option<Claimed>, CallError> {
+    async fn claim(&self, d: &Descriptor, c: &Claim) -> Result<ClaimAnswer, CallError> {
         let path = format!("{}/claim", engine_path(d));
         let res = self.send(reqwest::Method::POST, &path, c).await?;
         if res.status() == StatusCode::NO_CONTENT {
-            return Ok(None);
+            return Ok(ClaimAnswer::Idle(Idle::default()));
         }
-        Self::json(res).await.map(Some)
+        Self::json(res).await
     }
 
     async fn renew(&self, run: &str, r: &Renew) -> Result<Renewed, CallError> {

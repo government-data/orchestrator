@@ -9,9 +9,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::Utc;
 use engine_port::{
-    Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, FolderRecord, Found,
-    FoundAnswer, Inventory, InventoryAnswer, Lock, LockAnswer, LogLine, Logs, Pools, Registered,
-    Renew, RenewAction, Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
+    Claim, ClaimAnswer, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, FolderRecord,
+    Found, FoundAnswer, Idle, Inventory, InventoryAnswer, Lock, LockAnswer, LogLine, Logs, Pools,
+    Registered, Renew, RenewAction, Renewed, Resume, LEASE_SECS, RENEW_EVERY_SECS,
 };
 use orchestration_model::RunState;
 use serde_json::Value;
@@ -209,6 +209,31 @@ impl FakeOrchestrator {
         self.with(|s| s.held = on);
     }
 
+    fn claim_run(s: &mut State, d: &Descriptor) -> Option<Claimed> {
+        if s.held {
+            return None;
+        }
+        s.next += 1;
+        let lease = format!("lease-{}", s.next);
+        let (id, run) = s.runs.iter_mut().find(|(_, r)| {
+            r.state == RunState::Queued && !r.cancel_asked && d.kind(&r.kind).is_some()
+        })?;
+        run.state = RunState::Running;
+        run.lease = Some(lease.clone());
+        Some(Claimed {
+            run: id.clone(),
+            flow: "flow-1".into(),
+            kind: run.kind.clone(),
+            parameters: run.parameters.clone(),
+            attempt: run.attempt,
+            timeout_secs: 60,
+            lease,
+            lease_until: until(),
+            resume: run.resume.clone(),
+            variables: Default::default(),
+        })
+    }
+
     fn leased<'a>(s: &'a mut State, run: &str, lease: &str) -> Result<&'a mut FakeRun, CallError> {
         match s.runs.get_mut(run) {
             Some(r) if r.state == RunState::Running && r.lease.as_deref() == Some(lease) => Ok(r),
@@ -235,30 +260,12 @@ impl Orchestrator for FakeOrchestrator {
         })
     }
 
-    async fn claim(&self, d: &Descriptor, _: &Claim) -> Result<Option<Claimed>, CallError> {
-        Ok(self.with(|s| {
-            if s.held {
-                return None;
-            }
-            s.next += 1;
-            let lease = format!("lease-{}", s.next);
-            let (id, run) = s.runs.iter_mut().find(|(_, r)| {
-                r.state == RunState::Queued && !r.cancel_asked && d.kind(&r.kind).is_some()
-            })?;
-            run.state = RunState::Running;
-            run.lease = Some(lease.clone());
-            Some(Claimed {
-                run: id.clone(),
-                flow: "flow-1".into(),
-                kind: run.kind.clone(),
-                parameters: run.parameters.clone(),
-                attempt: run.attempt,
-                timeout_secs: 60,
-                lease,
-                lease_until: until(),
-                resume: run.resume.clone(),
-                variables: Default::default(),
-            })
+    /// The first queued run of the engine's kinds; none while held, with
+    /// `scan` while a scan waits for the next found report.
+    async fn claim(&self, d: &Descriptor, _: &Claim) -> Result<ClaimAnswer, CallError> {
+        Ok(self.with(|s| match Self::claim_run(s, d) {
+            Some(run) => ClaimAnswer::Run(Box::new(run)),
+            None => ClaimAnswer::Idle(Idle { scan: s.scan }),
         }))
     }
 

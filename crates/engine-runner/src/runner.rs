@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Logs, Registered, Renew, RenewAction, Renewed,
+    Claim, ClaimAnswer, Claimed, Descriptor, Finish, Logs, Registered, Renew, RenewAction, Renewed,
 };
 use orchestration_model::{FinalState, Interruption};
 use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
@@ -152,8 +152,14 @@ impl<E: Engine, O: Orchestrator, G: Guard> Runner<E, O, G> {
         let claim = Claim {
             runner: self.name.clone(),
         };
-        let Some(run) = self.orchestrator.claim(&self.descriptor, &claim).await? else {
-            return Ok(None);
+        let run = match self.orchestrator.claim(&self.descriptor, &claim).await? {
+            ClaimAnswer::Run(run) => *run,
+            ClaimAnswer::Idle(idle) => {
+                if idle.scan {
+                    self.scan.notify_one();
+                }
+                return Ok(None);
+            }
         };
         let drive = Drive {
             engine: Arc::clone(&self.engine),

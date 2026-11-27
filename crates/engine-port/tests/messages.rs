@@ -56,6 +56,8 @@ fn every_message_round_trips() {
         }),
         variables: BTreeMap::from([("region".into(), json!("north"))]),
     });
+    round_trip(&Idle { scan: true });
+    round_trip(&Idle::default());
     round_trip(&Renew {
         lease: "lease-1".into(),
         progress: Some(Progress {
@@ -217,4 +219,30 @@ fn the_schemas_match_the_snapshot() {
         finish,
         &json!(["succeeded", "failed", "timed_out", "cancelled"])
     );
+}
+
+#[test]
+fn a_claim_answer_is_a_run_or_an_idle_with_its_scan() {
+    let run = Claimed {
+        run: "run-1".into(),
+        flow: "flow-1".into(),
+        kind: "load".into(),
+        parameters: json!({}),
+        attempt: 1,
+        timeout_secs: 60,
+        lease: "lease-1".into(),
+        lease_until: at("2026-11-25T10:02:00Z"),
+        resume: None,
+        variables: BTreeMap::new(),
+    };
+    let wire = serde_json::to_value(&run).unwrap();
+    let answer: ClaimAnswer = serde_json::from_value(wire).unwrap();
+    assert!(!answer.scan());
+    assert_eq!(answer.run(), Some(run));
+    let idle: ClaimAnswer = serde_json::from_value(json!({"scan": true})).unwrap();
+    assert_eq!(idle, ClaimAnswer::Idle(Idle { scan: true }));
+    assert!(idle.scan());
+    assert_eq!(idle.run(), None);
+    assert_eq!(serde_json::to_value(Idle::default()).unwrap(), json!({}));
+    assert!(serde_json::from_value::<ClaimAnswer>(json!({"scan": true, "other": 1})).is_err());
 }
