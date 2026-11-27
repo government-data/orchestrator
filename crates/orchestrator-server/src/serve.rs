@@ -28,7 +28,7 @@ use tokio::task::JoinSet;
 
 use crate::{
     chains_router, core_router, counted, people_router, router, send_outbox, watch_iam_changes,
-    CachedActions, Clock, CoreEvents, CoreMachine, CoreToken, EnginePort, Expected,
+    CachedActions, Clock, CoreCaller, CoreEvents, CoreToken, EnginePort, Expected,
     HttpCoreSchedules, HttpEffectiveActions, HttpEvents, HttpMachineList, HttpModuleList,
     InternalCaller, JwksKeys, Metrics, OidcPeople, People, PeopleState, PortState, Scheduler,
     Settings, SystemClock, TraefikMachine, ORCHESTRATOR_MODULE,
@@ -116,7 +116,12 @@ pub async fn serve(
         expected(&settings.issuer, ORCHESTRATOR_MODULE),
         SystemClock,
     );
-    let app = app(&port, Arc::new(engines), people, metrics);
+    let core = CoreCaller::new(
+        JwksKeys::new(http.clone(), &settings.issuer),
+        expected(&settings.issuer, ORCHESTRATOR_MODULE),
+        SystemClock,
+    );
+    let app = app(&port, Arc::new(engines), Arc::new(core), people, metrics);
 
     let mut loops = JoinSet::new();
     loops.spawn(ticks(scheduler, every.tick));
@@ -170,10 +175,12 @@ fn people(
 
 /// Every route on one router: the engine port (`engines` reads the
 /// machine and the engine module's token), the core's calls (the machine
-/// alone; a chain, the core's machine alone) and the people's API, counted by route template.
+/// alone; a chain, `core` reads the core's machine and its own token) and
+/// the people's API, counted by route template.
 fn app<C: Clock + Clone>(
     port: &EnginePort<C>,
     engines: Arc<dyn crate::Authenticate>,
+    core: Arc<dyn crate::Authenticate>,
     people: People,
     metrics: Arc<Metrics>,
 ) -> Router {
@@ -187,7 +194,7 @@ fn app<C: Clock + Clone>(
     });
     let chains_state = Arc::new(PortState {
         port: port.clone(),
-        auth: Arc::new(CoreMachine),
+        auth: core,
     });
     let internal = router(engine_state)
         .merge(core_router(core_state))

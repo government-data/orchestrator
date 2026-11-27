@@ -23,6 +23,7 @@ use testcontainers::{ContainerAsync, ImageExt};
 use testcontainers_modules::postgres::Postgres;
 use tower::ServiceExt;
 
+pub mod core_token;
 pub mod people;
 
 pub fn at(s: &str) -> DateTime<Utc> {
