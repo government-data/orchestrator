@@ -43,6 +43,20 @@ pub fn module_of(
     e: &Expected,
     now: DateTime<Utc>,
 ) -> Option<String> {
+    let c = verified_claims(token, keys, e, now)?;
+    let client = c.get("client_id")?.as_str()?;
+    let module = client.strip_suffix(MACHINE_CLIENT_SUFFIX)?;
+    (!module.is_empty()).then(|| module.to_string())
+}
+
+/// The claims of `token`, an EdDSA access token (`at+jwt`) signed by one
+/// of `keys`, if it names `e`'s issuer and audience and is live at `now`.
+pub(crate) fn verified_claims(
+    token: &str,
+    keys: &[(String, Vec<u8>)],
+    e: &Expected,
+    now: DateTime<Utc>,
+) -> Option<Value> {
     let mut parts = token.split('.');
     let (header, claims, signature) = (parts.next()?, parts.next()?, parts.next()?);
     if parts.next().is_some() {
@@ -65,12 +79,8 @@ pub fn module_of(
         _ => false,
     };
     let live = c.get("exp")?.as_i64()? > now.timestamp();
-    if c.get("iss")? != &Value::String(e.issuer.clone()) || !audience_ok || !live {
-        return None;
-    }
-    let client = c.get("client_id")?.as_str()?;
-    let module = client.strip_suffix(MACHINE_CLIENT_SUFFIX)?;
-    (!module.is_empty()).then(|| module.to_string())
+    let ok = c.get("iss")? == &Value::String(e.issuer.clone()) && audience_ok && live;
+    ok.then_some(c)
 }
 
 /// The engine port's caller: the machine by its certificate (Traefik's

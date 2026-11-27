@@ -1,12 +1,14 @@
 //! The core's API as the orchestrator calls it (decisions 0011 and 0015):
-//! `GET /v1/machines` and `GET /v1/modules` under the core's base on its
+//! `GET /v1/machines`, `GET /v1/modules` and `GET /v1/iam/effective`
+//! under the core's base on its
 //! internal entry point (`https://<internal name>/api`, with the machine's
 //! certificate), each with an access token of the module's machine client
 //! (`<module>-machine`, client credentials) for the audience `core`.
 //!
 //! The server binary builds one [`CoreToken`] and shares it between
 //! [`HttpMachineList`] (set with `EnginePort::with_machines`) and
-//! [`HttpModuleList`] (set with `Scheduler::with_modules`).
+//! [`HttpModuleList`] (set with `Scheduler::with_modules`) and
+//! [`HttpEffectiveActions`] (behind a `CachedActions`).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,7 +19,7 @@ use serde_json::Value;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-use crate::{MachineList, ModuleList};
+use crate::{EffectiveActions, MachineList, ModuleList, Person};
 
 /// The audience of the core's API for a module's machine client.
 pub const CORE_AUDIENCE: &str = "core";
@@ -209,5 +211,70 @@ impl ModuleList for HttpModuleList {
     async fn installed(&self) -> Option<Vec<String>> {
         let body = get_json(&self.http, &self.token, &self.url).await?;
         names(body, "modules", &self.url)
+    }
+}
+
+/// The core's `GET /v1/iam/effective?subject=<account id>`: which of the
+/// orchestrator's own declared actions a person holds now.
+#[derive(Debug, Clone)]
+pub struct HttpEffectiveActions {
+    http: reqwest::Client,
+    url: String,
+    token: Arc<CoreToken>,
+}
+
+impl HttpEffectiveActions {
+    /// The core at `base`, as [`HttpMachineList::new`].
+    #[must_use]
+    pub fn new(http: reqwest::Client, base: &str, token: Arc<CoreToken>) -> Self {
+        Self {
+            http,
+            url: format!("{}/v1/iam/effective", base.trim_end_matches('/')),
+            token,
+        }
+    }
+}
+
+#[async_trait]
+impl EffectiveActions for HttpEffectiveActions {
+    /// `{"subject", "actions": [..]}`: the actions; a 404 (no such
+    /// account) holds none. The subject is never logged.
+    async fn held(&self, person: &Person) -> Option<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Effective {
+            actions: Vec<String>,
+        }
+        let res = self
+            .http
+            .get(&self.url)
+            .query(&[("subject", person.id.as_str())])
+            .bearer_auth(self.token.get().await?)
+            .send()
+            .await;
+        let res = match res {
+            Ok(res) => res,
+            Err(e) => {
+                tracing::warn!("core: {} failed: {}", self.url, e.without_url());
+                return None;
+            }
+        };
+        match res.status() {
+            reqwest::StatusCode::OK => {}
+            reqwest::StatusCode::NOT_FOUND => return Some(Vec::new()),
+            status => {
+                if status == reqwest::StatusCode::UNAUTHORIZED {
+                    self.token.forget().await;
+                }
+                tracing::warn!("core: {} answered HTTP {}", self.url, status.as_u16());
+                return None;
+            }
+        }
+        match res.json::<Effective>().await {
+            Ok(e) => Some(e.actions),
+            Err(_) => {
+                tracing::warn!("core: {} answered an unexpected shape", self.url);
+                None
+            }
+        }
     }
 }

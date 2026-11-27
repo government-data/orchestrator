@@ -13,6 +13,7 @@ mod inventory;
 mod machines;
 mod metrics;
 mod modules;
+mod people;
 mod port;
 mod removal;
 mod scan;
@@ -21,13 +22,19 @@ mod sealer;
 mod token;
 
 pub use clock::{Clock, FixedClock, SystemClock};
-pub use core_api::{CoreToken, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE};
+pub use core_api::{
+    CoreToken, HttpEffectiveActions, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE,
+};
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use machines::MachineList;
 pub use metrics::{Metrics, RunResult};
 pub use modules::{installed_lines, ModuleList};
+pub use people::{
+    person_of, CachedActions, EffectiveActions, OidcPeople, People, Person, PersonTokens, Refused,
+    IMPORT_FLOWS,
+};
 pub use port::{runner_of, EnginePort, Machine, PortError};
 pub use removal::{removal, RemovalAnswer, ORCHESTRATOR_MODULE};
 pub use scan::ScanAsked;
