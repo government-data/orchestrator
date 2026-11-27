@@ -46,13 +46,13 @@ route:
 # they may do is what the core says they hold now, never a token's claim.
 auth: oidc
 
-# No `oidc.machine` yet: the server calls the core's API (machines,
-# modules, effective actions, events) with a machine client for the
-# audience `core`, but a machine client must consume at least one required
-# capability and the orchestrator requires none. Until a ruling allows a
-# machine client with audiences only, the agent issues no machine client
-# and compose.yml's QD_OIDC_MACHINE_CLIENT_ID is not set.
+# The server calls the core's API (machines, modules, effective actions,
+# events) with its machine client for the audience `core`: a machine client
+# with audiences and no capability, since the orchestrator requires none
+# (decision 0011, ruling 94).
 oidc:
+  machine:
+    audiences: [core]
   people:
     redirect_paths: [/orchestrator/auth/callback]
     logout_paths: [/orchestrator/]
