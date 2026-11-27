@@ -1,0 +1,87 @@
+# The orchestrator module's manifest for quality-sdk (decisions 0002, 0009,
+# 0011, 0015 and 0017): the server that fires schedules, keeps every run's
+# state and hands runs out to engine modules over the engine port. It names
+# no engine. Its version is the module's own; a release tag is
+# `orchestrator-v` + this version.
+name: orchestrator
+version: 0.1.0
+
+provides:
+  capabilities:
+    # The engine port an engine module's runner pulls its runs from; its
+    # machine client asks for tokens of this audience.
+    - name: orchestration
+      version: 1
+      protocols: [engine-port/1]
+      properties:
+        token-audience: orchestrator
+  # Every end of a run, whatever ends it (the outbox, decision 0017).
+  events:
+    - topic: orchestrator.run.finished
+      version: 1
+      schema: events/run-finished.v1.json
+
+# The people's cached actions are dropped when the core's IAM changes.
+consumes:
+  events:
+    - topic: core.iam.changed
+      version: 1
+
+# The people's API at /orchestrator/api/v1/… on the web entry point; the
+# agent writes Traefik's route to the `server` service, reached on
+# data-quality-edge as orchestrator-server (compose.yml).
+route:
+  path: /orchestrator
+  service: server
+  port: 8080
+
+# A person calls with an access token of the people's client (EdDSA); what
+# they may do is what the core says they hold now, never a token's claim.
+auth: oidc
+
+# No `oidc.machine` yet: the server calls the core's API (machines,
+# modules, effective actions, events) with a machine client for the
+# audience `core`, but a machine client must consume at least one required
+# capability and the orchestrator requires none. Until a ruling allows a
+# machine client with audiences only, the agent issues no machine client
+# and compose.yml's QD_OIDC_MACHINE_CLIENT_ID is not set.
+oidc:
+  people:
+    redirect_paths: [/orchestrator/auth/callback]
+    logout_paths: [/orchestrator/]
+
+# The key that seals flow variables and secrets at rest (AES-256-GCM): lost,
+# every sealed value is lost, so it is backed up as a key. The server runs as
+# uid 1000.
+secrets:
+  uid: 1000
+  generate:
+    - name: sealing-key
+      bytes: 32
+      critical: true
+
+data:
+  # Flows, schedules, runs, logs, variables, deploys and the outbox.
+  databases:
+    - name: orchestrator
+      create: true
+      critical: true
+
+health:
+  services: [server]
+
+# On the module's route of the internal entry point, asked by the core with
+# its machine certificate.
+drain:
+  path: /internal/drain
+removal:
+  path: /internal/removal
+
+# Only the action decision 0011 names; the flows, runs, logs, schedules and
+# pauses actions wait for a ruling.
+permissions:
+  actions:
+    - name: orchestrator:ImportFlows
+      description:
+        en: Import the flows already on a cluster
+        es: Importar los flujos que ya están en un clúster

@@ -1,0 +1,82 @@
+# The orchestrator module's compose, run by quality-sdk's update agent as
+# the project `orchestrator` on the master server (decision 0011):
+#
+#   docker compose --project-name orchestrator \
+#     --project-directory /opt/quality-data/orchestrator/current \
+#     --file /opt/quality-data/orchestrator/current/compose.yml \
+#     --env-file /opt/quality-data/orchestrator/.env up -d --no-build --wait
+#
+# One service, `server` (the `orchestrator` binary of this module's image,
+# Dockerfile, by digest as IMAGE_ORCHESTRATOR): the engine port and the
+# core's drain and removal on the module's route of the internal entry
+# point, the people's API under /orchestrator on the web entry point, the
+# scheduler, the outbox and the metrics file. Traefik reaches it on
+# data-quality-edge as orchestrator-server; PostgreSQL on data-quality-db.
+# It publishes no port: the machine header it reads is written by Traefik
+# only.
+#
+# Required environment (the module's .env): the agent's QD_SECRETS_DIR,
+# QD_DB_* and QD_OIDC_*; QD_MACHINE_DIR (the master's machine certificate:
+# ca.crt, machine.pem); QD_CORE_NAME (the master's machine name, as in its
+# certificate) and CORE_URL (the core's internal entry point on 443:
+# https://<QD_CORE_NAME>/api). Optional: QD_DB_SSLMODE (verify-full).
+#
+# The master's name resolves to the host (host-gateway), where the core's
+# Traefik passes it on 443 by SNI.
+name: orchestrator
+
+networks:
+  edge:
+    name: data-quality-edge
+    external: true
+  db:
+    name: data-quality-db
+    external: true
+
+volumes:
+  # The metrics files Alloy reads (decision 0071, point 9), the core's.
+  metrics:
+    name: ${QD_METRICS_VOLUME:-data-quality-metrics}
+    external: true
+
+secrets:
+  sealing-key:
+    file: ${QD_SECRETS_DIR:?}/sealing-key
+  database-password:
+    file: ${QD_SECRETS_DIR:?}/database-password
+  oidc-machine-secret:
+    file: ${QD_SECRETS_DIR:?}/oidc-machine-secret
+  db-ca:
+    file: ${QD_DB_CA_FILE:?}
+
+services:
+  server:
+    image: ${IMAGE_ORCHESTRATOR:?set IMAGE_ORCHESTRATOR to the image by digest}
+    restart: unless-stopped
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    # SIGTERM: the calls in flight end, then it stops.
+    stop_grace_period: 1m
+    networks:
+      edge:
+        aliases: [orchestrator-server]
+      db: {}
+    secrets: [sealing-key, database-password, oidc-machine-secret, db-ca]
+    environment:
+      QD_DB_HOST: ${QD_DB_HOST:?}
+      QD_DB_PORT: ${QD_DB_PORT:-5432}
+      QD_DB_USER: ${QD_DB_USER:?}
+      QD_DB_NAME: ${QD_DB_NAME:?}
+      QD_DB_CA_FILE: /run/secrets/db-ca
+      QD_DB_SSLMODE: ${QD_DB_SSLMODE:-verify-full}
+      QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
+      QD_OIDC_PEOPLE_CLIENT_ID: ${QD_OIDC_PEOPLE_CLIENT_ID:?}
+      QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
+      CORE_URL: ${CORE_URL:?}
+      QD_METRICS_DIR: /run/qd-metrics
+    extra_hosts: ["${QD_CORE_NAME:?}:host-gateway"]
+    volumes:
+      - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
+      - metrics:/run/qd-metrics
