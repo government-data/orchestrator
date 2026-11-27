@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Logs, Refused, Registered,
-    Release, Renew, RenewAction, Renewed, LEASE_SECS,
+    Claim, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Lock, LockAnswer, Logs,
+    Refused, Registered, Release, Renew, RenewAction, Renewed, LEASE_SECS,
 };
 use orchestration_model::{open_windows, EngineLine, EngineName};
 use orchestrator_postgres::{ClaimFor, PgStore, StoreError};
@@ -284,6 +284,21 @@ impl<C: Clock> EnginePort<C> {
             }
         }
         Ok(())
+    }
+
+    /// Takes a lock for a running run (core decision 0090, point 6.2.4):
+    /// granted unless another running run holds it.
+    pub async fn take_lock(&self, run: &str, l: &Lock) -> Result<LockAnswer, PortError> {
+        l.validate()?;
+        let now = self.clock.now();
+        let granted = self.store.take_lock(run, &l.lease, &l.name, now).await?;
+        Ok(LockAnswer { granted })
+    }
+
+    /// Gives a run's lock back; one it does not hold changes nothing.
+    pub async fn release_lock(&self, run: &str, l: &Lock) -> Result<(), PortError> {
+        l.validate()?;
+        Ok(self.store.release_lock(run, &l.lease, &l.name).await?)
     }
 
     /// The engine's drain hold: from now no claim of the engine is

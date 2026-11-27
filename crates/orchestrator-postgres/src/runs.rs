@@ -242,7 +242,7 @@ impl PgStore {
         }
     }
 
-    async fn holds_lease(
+    pub(crate) async fn holds_lease(
         &self,
         tx: &mut sqlx::PgConnection,
         run: &str,
@@ -270,8 +270,11 @@ WITH pick AS (
        AND NOT EXISTS (SELECT 1 FROM engine_holds h WHERE h.engine = r.engine AND h.until > $7)
        AND (f.allow_overlap OR NOT EXISTS (
             SELECT 1 FROM runs o WHERE o.flow_id = r.flow_id AND o.state = 'running'))
-       AND (r.lock_name IS NULL OR NOT EXISTS (
-            SELECT 1 FROM runs o WHERE o.lock_name = r.lock_name AND o.state = 'running'))
+       AND (r.lock_name IS NULL OR (NOT EXISTS (
+            SELECT 1 FROM runs o WHERE o.lock_name = r.lock_name AND o.state = 'running')
+            AND NOT EXISTS (
+            SELECT 1 FROM run_locks l JOIN runs o ON o.id = l.run_id
+             WHERE l.name = r.lock_name AND o.state = 'running')))
        AND (r.slot_pool IS NULL OR (
             SELECT count(*) FROM runs o WHERE o.slot_pool = r.slot_pool AND o.state = 'running')
             < COALESCE((SELECT s.size FROM slot_pools s WHERE s.name = r.slot_pool), 1))

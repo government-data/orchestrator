@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use engine_port::{
-    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Logs, Release, Renew,
+    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Lock, Logs, Release, Renew,
 };
 use orchestration_model::{EngineLine, EngineName, Line};
 use serde_json::json;
@@ -143,6 +143,8 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
         .route("/internal/runs/{id}/renew", post(renew::<C>))
         .route("/internal/runs/{id}/logs", post(logs::<C>))
         .route("/internal/runs/{id}/finish", post(finish::<C>))
+        .route("/internal/runs/{id}/locks", post(take_lock::<C>))
+        .route("/internal/runs/{id}/locks/release", post(release_lock::<C>))
         .route("/internal/deploys/{id}/finish", post(finish_deploy::<C>))
         .with_state(state)
 }
@@ -240,6 +242,25 @@ async fn finish<C: Clock>(
     Json(f): Json<Finish>,
 ) -> Result<StatusCode, ApiError> {
     s.port.finish(&id, &f).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn take_lock<C: Clock>(
+    State(s): Shared<C>,
+    Caller(..): Caller,
+    Path(id): Path<String>,
+    Json(l): Json<Lock>,
+) -> Result<Response, ApiError> {
+    Ok(Json(s.port.take_lock(&id, &l).await?).into_response())
+}
+
+async fn release_lock<C: Clock>(
+    State(s): Shared<C>,
+    Caller(..): Caller,
+    Path(id): Path<String>,
+    Json(l): Json<Lock>,
+) -> Result<StatusCode, ApiError> {
+    s.port.release_lock(&id, &l).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -9,6 +9,7 @@ mod deploys;
 mod engines;
 mod flows;
 mod found;
+mod locks;
 mod reaper;
 mod removal;
 mod runs;
