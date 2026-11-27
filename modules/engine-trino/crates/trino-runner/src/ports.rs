@@ -54,8 +54,11 @@ pub enum TrinoUser {
     Maint,
     /// Reads its source and loads its dataset's bronze.
     Extract,
-    /// Reads one source's catalog (a `tables` listing).
+    /// Reads one source's catalog: a `tables` listing, a `map` profile or
+    /// a page of `records`.
     Source,
+    /// Reads its dataset's silver for samples (a `test_rule`).
+    Sample,
 }
 
 impl TrinoUser {
@@ -68,6 +71,7 @@ impl TrinoUser {
             Self::Maint => "maint",
             Self::Extract => "extract",
             Self::Source => "source",
+            Self::Sample => "sample",
         }
     }
 
@@ -79,7 +83,8 @@ impl TrinoUser {
             "evaluate" | "backfill" | "rule_test" | "retract" | "slas" => Some(Self::Rules),
             "prepare" => Some(Self::Maint),
             "extract" => Some(Self::Extract),
-            "tables" => Some(Self::Source),
+            "tables" | "map" | "records" => Some(Self::Source),
+            "test_rule" => Some(Self::Sample),
             _ => None,
         }
     }
@@ -106,6 +111,14 @@ pub trait Core: Send + Sync + 'static {
     async fn token(&self, job: &str, user: TrinoUser) -> Result<String, CoreError>;
     /// The secrets of the source the job reads (none for most kinds).
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError>;
+    /// The rows of the values read `statement` (ruling 79), kept by the
+    /// core before the run reports; an error is a core that did not answer.
+    async fn rows(
+        &self,
+        job: &str,
+        statement: &str,
+        rows: &[Vec<serde_json::Value>],
+    ) -> Result<Delivery, CoreError>;
     /// The run's report (ruling 75); an error is a core that did not
     /// answer, and the report is sent again.
     async fn report(&self, job: &str, report: &RunReport) -> Result<Delivery, CoreError>;

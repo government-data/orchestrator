@@ -44,9 +44,21 @@ pub enum Expects {
         columns: Vec<(String, String)>,
         max_rows: u64,
     },
+    /// A read whose rows carry values (core decision 0090, rulings 79 to
+    /// 81): exactly these columns, at most `max_rows` (never above
+    /// [`MAX_VALUES_ROWS`]), run as the job's own user. Its rows go to the
+    /// core's rows route, never to the report or a log.
+    Values {
+        columns: Vec<(String, String)>,
+        max_rows: u64,
+    },
     /// A statement that changes the catalog or a table's layout: no rows.
     Done,
 }
+
+/// The most rows a values read may declare: a page of records and one
+/// more, as the core bounds it.
+pub const MAX_VALUES_ROWS: u64 = 1_001;
 
 /// Who a statement runs as: the job's own user, or its dataset's report
 /// user, which reads gold only (point 7.3: counts are read back as

@@ -33,7 +33,7 @@ pub fn fits(answer: &Answer, expects: &Expects) -> Option<u64> {
                 _ => None,
             }
         }
-        Expects::Rows { columns, max_rows } => {
+        Expects::Rows { columns, max_rows } | Expects::Values { columns, max_rows } => {
             let n = u64::try_from(answer.rows.len()).ok()?;
             (answer.columns == *columns && n <= *max_rows).then_some(0)
         }

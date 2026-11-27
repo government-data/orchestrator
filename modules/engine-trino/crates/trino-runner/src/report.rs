@@ -159,6 +159,42 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         Self::undelivered(outcome, "report_not_delivered")
     }
 
+    /// Sends a values read's rows until the core keeps them, a few times
+    /// while it does not answer; then the run is cut by the system and a
+    /// repeated attempt reads them again. A refusal fails it for good. No
+    /// row reaches a log: only their statement's id and their count.
+    pub(crate) async fn post_rows(
+        &self,
+        job: &str,
+        statement: &str,
+        rows: &[Vec<Value>],
+        ctx: &RunContext,
+    ) -> Result<(), Outcome> {
+        let mut wait = self.report_wait;
+        for attempt in 1..=TRIES {
+            match self.core.rows(job, statement, rows).await {
+                Ok(Delivery::Kept) => {
+                    let n = rows.len();
+                    ctx.log(
+                        LogStream::System,
+                        &format!("statement {statement}: {n} rows sent"),
+                    );
+                    return Ok(());
+                }
+                Ok(Delivery::Refused(why)) => {
+                    ctx.log(LogStream::System, &format!("rows refused: {why}"));
+                    return Err(Outcome::failed("rows_refused"));
+                }
+                Err(_) if attempt < TRIES => {
+                    tokio::time::sleep(wait).await;
+                    wait = wait.saturating_mul(2);
+                }
+                Err(_) => {}
+            }
+        }
+        Err(crate::engine::transient("core_unavailable"))
+    }
+
     fn undelivered(outcome: Outcome, class: &str) -> Outcome {
         if outcome.error_class.is_some() {
             outcome
