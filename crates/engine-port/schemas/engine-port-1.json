@@ -1174,6 +1174,60 @@
       "title": "Logs",
       "type": "object"
     },
+    "Pools": {
+      "$defs": {
+        "SlotPool": {
+          "additionalProperties": false,
+          "description": "One pool: at most `size` runs of `kinds` run at once.",
+          "properties": {
+            "fair_by": {
+              "description": "The run parameter (`[a-z_][a-z0-9_]`, at most 64) whose values take\nturns: the value served least recently goes first.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kinds": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "name": {
+              "description": "`[a-z][a-z0-9_-]`, at most 64 bytes.",
+              "type": "string"
+            },
+            "size": {
+              "format": "uint32",
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "name",
+            "size",
+            "kinds"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "Every pool of an engine and line; what is not listed is in no pool.",
+      "properties": {
+        "pools": {
+          "items": {
+            "$ref": "#/$defs/SlotPool"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "pools"
+      ],
+      "title": "Pools",
+      "type": "object"
+    },
     "Registered": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "additionalProperties": false,

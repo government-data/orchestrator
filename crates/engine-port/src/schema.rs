@@ -7,8 +7,8 @@ use serde_json::{json, Value};
 
 use crate::{
     ArtefactRecord, Claim, Claimed, DeployClaimed, DeployFinish, Descriptor, Finish, Found,
-    FoundAnswer, Hold, HoldAnswer, Inventory, InventoryAnswer, Lock, LockAnswer, Logs, Registered,
-    Release, Renew, Renewed,
+    FoundAnswer, Hold, HoldAnswer, Inventory, InventoryAnswer, Lock, LockAnswer, Logs, Pools,
+    Registered, Release, Renew, Renewed,
 };
 
 pub(crate) fn engine_name(_: &mut SchemaGenerator) -> Schema {
@@ -55,6 +55,7 @@ pub fn schemas() -> Value {
     add("Finish", schemars::schema_for!(Finish));
     add("Lock", schemars::schema_for!(Lock));
     add("LockAnswer", schemars::schema_for!(LockAnswer));
+    add("Pools", schemars::schema_for!(Pools));
     add("Hold", schemars::schema_for!(Hold));
     add("HoldAnswer", schemars::schema_for!(HoldAnswer));
     add("Release", schemars::schema_for!(Release));
