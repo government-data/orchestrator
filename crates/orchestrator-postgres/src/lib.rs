@@ -42,7 +42,8 @@ pub use store::{PgStore, StoreError};
 pub use variables::{SecretInfo, Variable, VariableValue};
 
 use sqlx::migrate::{MigrateError, Migrator};
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
+pub use sqlx::postgres::{PgConnectOptions, PgSslMode};
 pub use sqlx::PgPool;
 
 /// The migrations, embedded in the binary.
