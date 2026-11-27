@@ -7,6 +7,8 @@
 //! verifies the bundles), `QD_OIDC_MACHINE_CLIENT_ID` and the machine
 //! secret file, `QD_MACHINE_DIR` (default `/run/qd-node`),
 //! `RUNNER_CONCURRENCY` (default 1), `RUNNER_NAME` (default the host name),
+//! `TRINO_TIER` (default `s`: the coordinator's tier, which sizes the
+//! `rules` pool sent at start),
 //! `QD_WORKER_MIN_FREE_BYTES` and `QD_WORKER_MIN_FREE_MEMORY_PCT` (the
 //! guard's minimums), `QD_METRICS_DIR` (where its metrics file
 //! `engine-trino.prom` goes, `off` for none).
@@ -17,7 +19,7 @@ use std::time::Duration;
 use engine_runner::{metrics_file, Engine, HttpOrchestrator, Runner, RunnerMetrics};
 use engine_trino_service::{core_from_env, machine_client, setting, setting_or, ClientTrino};
 use trino_client::TrinoClient;
-use trino_runner::TrinoEngine;
+use trino_runner::{pools, TrinoEngine};
 
 #[tokio::main]
 async fn main() {
@@ -35,6 +37,7 @@ async fn run() -> Result<(), String> {
     let concurrency = setting_or("RUNNER_CONCURRENCY", "1")
         .parse()
         .map_err(|_| "RUNNER_CONCURRENCY: a number".to_string())?;
+    let pools = pools(&setting_or("TRINO_TIER", "s"))?;
     let engine = TrinoEngine::new(
         core_from_env(client.clone())?,
         ClientTrino(TrinoClient::new(&setting("TRINO_URL")?, Some(&ca))?),
@@ -59,7 +62,13 @@ async fn run() -> Result<(), String> {
         tracing::warn!(error = %e, "registration refused or unreachable; again in 10 s");
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
-    tracing::info!("registered; claiming runs");
+    // The pools go before the first claim, so the rule kinds are admitted
+    // by the tier's R from the start; the same pools again at every start.
+    while let Err(e) = runner.send_pools(&pools).await {
+        tracing::warn!(error = %e, "pools refused or unreachable; again in 10 s");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+    tracing::info!("registered and pools sent; claiming runs");
     loop {
         match runner.claim_once().await {
             Ok(Some(_)) => {}

@@ -2,11 +2,12 @@
 //! and step 20): the core's signed statement bundle and its verification,
 //! the check of each answer's shape, the class of Trino's errors, and
 //! [`TrinoEngine`], engine-runner's `Engine` that runs a bundle through
-//! the [`Core`] and [`Trino`] ports.
+//! the [`Core`] and [`Trino`] ports, and the slot pools it sends.
 
 mod bundle;
 mod check;
 mod engine;
+mod pools;
 mod ports;
 mod report;
 mod run;
@@ -18,6 +19,7 @@ pub use bundle::{
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};
+pub use pools::{pools, rules_concurrency, rules_kinds, FAIR_BY, RULES_POOL};
 pub use ports::{
     Core, CoreError, Credential, Delivery, JobRequest, Trino, TrinoFailure, TrinoUser,
 };
