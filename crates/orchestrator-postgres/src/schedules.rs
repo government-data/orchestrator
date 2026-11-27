@@ -22,6 +22,9 @@ pub struct Schedule {
     pub enabled: bool,
     pub next_fire_at: Option<DateTime<Utc>>,
     pub last_fire_at: Option<DateTime<Utc>>,
+    /// The core's id of a schedule the core keeps (core decision 0090,
+    /// point 2): its fires start the chain the core says.
+    pub core_id: Option<String>,
 }
 
 /// A schedule to create, checked and with its first fire computed.
@@ -37,7 +40,7 @@ pub struct NewSchedule {
 }
 
 const SCHEDULE_COLUMNS: &str = "id::text, flow_id::text, cron, timezone, trigger, parameters,
-    timeout_secs, enabled, next_fire_at, last_fire_at";
+    timeout_secs, enabled, next_fire_at, last_fire_at, core_id";
 
 fn schedule(r: &PgRow) -> Result<Schedule, StoreError> {
     let trigger: Option<Value> = r.try_get("trigger")?;
@@ -59,6 +62,7 @@ fn schedule(r: &PgRow) -> Result<Schedule, StoreError> {
         enabled: r.try_get("enabled")?,
         next_fire_at: r.try_get("next_fire_at")?,
         last_fire_at: r.try_get("last_fire_at")?,
+        core_id: r.try_get("core_id")?,
     })
 }
 
@@ -136,6 +140,60 @@ impl PgStore {
         .execute(&self.pool)
         .await?;
         Ok(done.rows_affected() == 1)
+    }
+
+    /// Keeps a schedule of the core on `flow_id`, enabled while `next` (its
+    /// next fire) is set: created, or replaced when its spec, flow or
+    /// state changed; else its own next fire is kept. `true` if anything
+    /// changed.
+    pub async fn keep_core_schedule(
+        &self,
+        flow_id: &str,
+        core_id: &str,
+        spec: &ScheduleSpec,
+        next: Option<DateTime<Utc>>,
+    ) -> Result<bool, StoreError> {
+        let trigger = spec
+            .trigger
+            .as_ref()
+            .map(serde_json::to_value)
+            .transpose()
+            .map_err(|e| StoreError::Invalid(e.to_string()))?;
+        let done = sqlx::query(
+            "INSERT INTO schedules (flow_id, cron, timezone, trigger, enabled, next_fire_at,
+                                    core_id, created_by)
+             VALUES ($1::uuid, $2, $3, $4, $5 IS NOT NULL, $5, $6, 'core')
+             ON CONFLICT (core_id) DO UPDATE
+                SET cron = EXCLUDED.cron, timezone = EXCLUDED.timezone,
+                    trigger = EXCLUDED.trigger, enabled = EXCLUDED.enabled,
+                    next_fire_at = EXCLUDED.next_fire_at, flow_id = EXCLUDED.flow_id
+              WHERE schedules.cron IS DISTINCT FROM EXCLUDED.cron
+                 OR schedules.timezone IS DISTINCT FROM EXCLUDED.timezone
+                 OR schedules.trigger IS DISTINCT FROM EXCLUDED.trigger
+                 OR schedules.flow_id IS DISTINCT FROM EXCLUDED.flow_id
+                 OR schedules.enabled IS DISTINCT FROM EXCLUDED.enabled",
+        )
+        .bind(flow_id)
+        .bind(&spec.cron)
+        .bind(&spec.timezone)
+        .bind(trigger)
+        .bind(next)
+        .bind(core_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() == 1)
+    }
+
+    /// Disables the core's schedules it no longer lists; how many.
+    pub async fn drop_core_schedules(&self, listed: &[&str]) -> Result<u64, StoreError> {
+        let done = sqlx::query(
+            "UPDATE schedules SET enabled = false, next_fire_at = NULL
+              WHERE core_id IS NOT NULL AND enabled AND core_id <> ALL($1)",
+        )
+        .bind(listed)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected())
     }
 
     pub async fn settings(&self) -> Result<Settings, StoreError> {

@@ -1,6 +1,8 @@
-//! The scheduler's tick (decision 0011): fire the schedules due, by the
-//! missed-fire policy; mark `lost` the runs whose lease expired; queue the
-//! repetitions their flows ask for; cancel what waited too long.
+//! The scheduler's tick (decision 0011): keep the core's schedules; fire
+//! the schedules due, by the missed-fire policy (a core's schedule starts
+//! the chain the core says, core decision 0090 point 2); mark `lost` the
+//! runs whose lease expired; queue the repetitions their flows ask for;
+//! move the chains on; cancel what waited too long.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,10 +13,10 @@ use chrono::{DateTime, Duration, Utc};
 use orchestration_model::{
     blocked, fires_to_run, merge_parameters, open_windows, retry, EngineLine, Trigger,
 };
-use orchestrator_postgres::{NewRun, PgStore, Schedule, StoreError};
+use orchestrator_postgres::{NewChain, NewRun, PgStore, Schedule, StoreError};
 use schedule::Calendar;
 
-use crate::{installed_lines, Clock, Metrics, ModuleList};
+use crate::{installed_lines, is_core_id, Clock, CoreSchedules, Metrics, ModuleList};
 
 /// Runners on engine port 1 stop a run they can no longer renew before its
 /// lease ends, so a lost run's engine is known to have stopped.
@@ -31,6 +33,8 @@ pub struct Tick {
     pub lost: u32,
     pub retried: u32,
     pub cancelled: u32,
+    /// Runs queued by chains moving on.
+    pub chained: u32,
 }
 
 /// The scheduler, on a store and a clock.
@@ -41,6 +45,8 @@ pub struct Scheduler<C> {
     metrics: Option<Arc<Metrics>>,
     modules: Option<Arc<dyn ModuleList>>,
     last_listed: Arc<Mutex<Option<HashSet<String>>>>,
+    /// The core's schedules, and the flow their chains run on.
+    core: Option<(Arc<dyn CoreSchedules>, String)>,
 }
 
 impl<C: Clock> Scheduler<C> {
@@ -72,7 +78,16 @@ impl<C: Clock> Scheduler<C> {
             metrics: None,
             modules: None,
             last_listed: Arc::default(),
+            core: None,
         }
+    }
+
+    /// Keeps and fires the core's schedules (core decision 0090, point 2),
+    /// their chains on the flow `flow_id`.
+    #[must_use]
+    pub fn with_core_schedules(mut self, core: Arc<dyn CoreSchedules>, flow_id: String) -> Self {
+        self.core = Some((core, flow_id));
+        self
     }
 
     /// Counts what each tick does in `metrics` and refreshes its gauges.
@@ -86,6 +101,7 @@ impl<C: Clock> Scheduler<C> {
     pub async fn tick(&self) -> Result<Tick, StoreError> {
         let now = self.clock.now();
         let mut tick = Tick::default();
+        self.keep_core_schedules(now).await?;
         self.fire(now, &mut tick).await?;
         let lost = self.store.reap(now).await?;
         tick.lost = count(lost.len());
@@ -96,6 +112,7 @@ impl<C: Clock> Scheduler<C> {
                 }
             }
         }
+        tick.chained = self.store.move_chains(now).await?.queued;
         if let Some(wait) = self.store.settings().await?.queued_wait_minutes {
             let before = now - Duration::minutes(i64::from(wait));
             tick.cancelled = count(self.store.cancel_stale(before, now).await?.len());
@@ -137,20 +154,35 @@ impl<C: Clock> Scheduler<C> {
                 .as_ref()
                 .is_some_and(|c| open.iter().any(|w| &w.cluster == c && w.skips));
             let mut last = None;
+            let mut unanswered = false;
             for fire in &fires {
                 last = Some(*fire);
                 if skips {
                     tick.skipped += 1;
                     continue;
                 }
-                if self
-                    .store
-                    .enqueue(&run_for(&flow, &s, *fire, now))
-                    .await?
-                    .is_some()
-                {
+                let queued = match &s.core_id {
+                    Some(core_id) => match self.fire_core(&s, core_id, *fire, now).await? {
+                        Some(queued) => queued,
+                        None => {
+                            unanswered = true;
+                            break;
+                        }
+                    },
+                    None => self
+                        .store
+                        .enqueue(&run_for(&flow, &s, *fire, now))
+                        .await?
+                        .is_some(),
+                };
+                if queued {
                     tick.queued += 1;
                 }
+            }
+            // The core did not answer: the fire stays due, and the fires
+            // already started are not started twice (one chain per fire).
+            if unanswered {
+                continue;
             }
             if fires.is_empty() {
                 tick.skipped += 1;
@@ -159,6 +191,69 @@ impl<C: Clock> Scheduler<C> {
             self.store.advance_schedule(&s.id, due, last, next).await?;
         }
         Ok(())
+    }
+}
+
+impl<C: Clock> Scheduler<C> {
+    /// Keeps the core's schedules as schedules of the chains' flow: new
+    /// ones created, changed ones replaced, those it no longer lists
+    /// disabled. Nothing changes while the core does not answer.
+    async fn keep_core_schedules(&self, now: DateTime<Utc>) -> Result<(), StoreError> {
+        let Some((core, flow)) = &self.core else {
+            return Ok(());
+        };
+        let Some(listed) = core.schedules().await else {
+            tracing::warn!("the core's schedules were not read: they are kept as they were");
+            return Ok(());
+        };
+        let mut kept = Vec::new();
+        for c in listed.iter().filter(|c| is_core_id(&c.id)) {
+            let next = if c.enabled {
+                c.spec.next_after(&c.id, now).ok().flatten()
+            } else {
+                None
+            };
+            self.store
+                .keep_core_schedule(flow, &c.id, &c.spec, next)
+                .await?;
+            kept.push(c.id.as_str());
+        }
+        self.store.drop_core_schedules(&kept).await?;
+        Ok(())
+    }
+
+    /// Asks the core what one fire of its schedule runs and starts that
+    /// chain: `Some(true)` if a chain started, `Some(false)` if nothing
+    /// runs (or the fire's chain exists), `None` if the core did not answer.
+    async fn fire_core(
+        &self,
+        s: &Schedule,
+        core_id: &str,
+        fire: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<Option<bool>, StoreError> {
+        let Some((core, flow)) = &self.core else {
+            return Ok(None);
+        };
+        let Some(answer) = core.fire(core_id, fire).await else {
+            tracing::warn!(schedule = %s.id, "the core did not say what a fire runs");
+            return Ok(None);
+        };
+        if answer.steps.is_empty() {
+            return Ok(Some(false));
+        }
+        if let Err(why) = orchestration_model::validate_steps(&answer.steps) {
+            tracing::warn!(schedule = %s.id, %why, "the core's chain is not valid: nothing runs");
+            return Ok(Some(false));
+        }
+        let chain = NewChain {
+            flow_id: flow.clone(),
+            origin: format!("core:{core_id}:{}", fire.timestamp()),
+            trigger: Trigger::Schedule(s.id.clone()),
+            steps: answer.steps,
+            now,
+        };
+        Ok(Some(self.store.start_chain(&chain).await?.is_some()))
     }
 }
 
