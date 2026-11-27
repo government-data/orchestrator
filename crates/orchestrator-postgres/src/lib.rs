@@ -21,6 +21,7 @@ mod schedules;
 mod stats;
 mod store;
 mod variables;
+mod views;
 mod windows;
 
 pub use adoption::Adoption;
@@ -40,6 +41,7 @@ pub use stats::{EndedRun, QueueStat};
 pub(crate) use store::corrupt;
 pub use store::{PgStore, StoreError};
 pub use variables::{SecretInfo, Variable, VariableValue};
+pub use views::{RunFilter, RunLogLine, RunPage, RunView};
 
 use sqlx::migrate::{MigrateError, Migrator};
 use sqlx::postgres::PgPoolOptions;
