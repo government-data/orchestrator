@@ -132,6 +132,7 @@ pub async fn run_suite<O: Orchestrator>(orchestrator: O, seed: &dyn Seed) {
     assert_eq!(registered.port, PORT);
     deploy_case(runner.orchestrator(), seed).await;
     scan_case(&runner, seed).await;
+    idle_scan_case(&runner, seed).await;
 
     let run = seed.queue(json!({"behave": "succeed"})).await;
     let ended = claim_until(&runner).await.await.expect("the run task ends");
@@ -247,4 +248,36 @@ async fn scan_case<O: Orchestrator>(runner: &Runner<FakeEngine, O, NoGuard>, see
         .await
         .expect("the waiting run is cancelled")
         .expect("the run task ends");
+}
+
+/// A scan asked of a runner with no run reaches it in the claim's empty
+/// answer, and its found report answers it.
+async fn idle_scan_case<O: Orchestrator>(runner: &Runner<FakeEngine, O, NoGuard>, seed: &dyn Seed) {
+    let short = Duration::from_millis(50);
+    // A scan told at the last case's renewals may still wait: take it.
+    runner.found_due(short).await;
+    assert!(
+        runner.claim_once().await.expect("an empty claim").is_none(),
+        "no run is queued"
+    );
+    assert_eq!(
+        runner.found_due(short).await,
+        crate::FoundDue::Timer,
+        "an empty claim with no scan asked asks for none"
+    );
+    seed.request_scan().await;
+    assert!(runner.claim_once().await.expect("an empty claim").is_none());
+    let due = tokio::time::timeout(
+        Duration::from_secs(10),
+        runner.found_due(crate::FOUND_EVERY),
+    )
+    .await
+    .expect("a scan asked reaches an idle runner at its claim");
+    assert_eq!(due, crate::FoundDue::Requested);
+    runner
+        .report_found()
+        .await
+        .expect("the found report on request")
+        .expect("the fake engine reports");
+    assert!(!seed.scan_pending().await, "its report answers the scan");
 }

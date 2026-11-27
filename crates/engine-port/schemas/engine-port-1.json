@@ -853,6 +853,19 @@
       "title": "HoldAnswer",
       "type": "object"
     },
+    "Idle": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A claim's empty answer when it has something to tell: no run to hand\nout now. An empty answer with nothing to tell is a bare 204, as before.",
+      "properties": {
+        "scan": {
+          "description": "Someone asked for a scan, as in [`Renewed::scan`]: it reaches a\nrunner with no run to renew. Sent only when true, and at each claim\nuntil the runner's next found report.",
+          "type": "boolean"
+        }
+      },
+      "title": "Idle",
+      "type": "object"
+    },
     "Inventory": {
       "$defs": {
         "ArtefactRecord": {

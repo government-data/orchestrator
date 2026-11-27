@@ -6,7 +6,7 @@
 //! | Call | Body | Answer |
 //! | --- | --- | --- |
 //! | `PUT /internal/engines/{engine}/{line}` | [`Descriptor`] | [`Registered`] |
-//! | `POST /internal/engines/{engine}/{line}/claim` | [`Claim`] | [`Claimed`], or 204 |
+//! | `POST /internal/engines/{engine}/{line}/claim` | [`Claim`] | [`Claimed`], [`Idle`] with a scan, or 204 |
 //! | `POST /internal/runs/{id}/renew` | [`Renew`] | [`Renewed`] |
 //! | `POST /internal/runs/{id}/logs` | [`Logs`] | 204 |
 //! | `POST /internal/runs/{id}/finish` | [`Finish`] | 204 |
@@ -45,7 +45,8 @@ pub use inventory::{
 pub use locks::{is_lock_name, Lock, LockAnswer, MAX_LOCK_NAME_BYTES};
 pub use pools::{Pools, SlotPool, MAX_POOLS, MAX_POOL_SIZE};
 pub use runs::{
-    Claim, Claimed, Finish, Hold, HoldAnswer, HoldState, LogLine, LogStream, Logs, Progress,
-    Release, Renew, RenewAction, Renewed, Resume, MAX_COUNTS, MAX_LOG_LINES, MAX_LOG_LINE_BYTES,
+    Claim, ClaimAnswer, Claimed, Finish, Hold, HoldAnswer, HoldState, Idle, LogLine, LogStream,
+    Logs, Progress, Release, Renew, RenewAction, Renewed, Resume, MAX_COUNTS, MAX_LOG_LINES,
+    MAX_LOG_LINE_BYTES,
 };
 pub use schema::schemas;

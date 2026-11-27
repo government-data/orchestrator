@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Lock, LockAnswer, Logs, Pools,
-    Refused, Registered, Release, Renew, RenewAction, Renewed, LEASE_SECS,
+    Claim, ClaimAnswer, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Idle, Lock,
+    LockAnswer, Logs, Pools, Refused, Registered, Release, Renew, RenewAction, Renewed, LEASE_SECS,
 };
 use orchestration_model::{open_windows, EngineLine, EngineName};
 use orchestrator_postgres::{ClaimFor, PgStore, StoreError};
@@ -166,10 +166,28 @@ impl<C: Clock> EnginePort<C> {
 
     /// Hands out a run of this engine and line to the runner, or none: none
     /// either while the runner's cluster is in an open maintenance window.
+    /// With none, `scan` while a scan asked of the runner waits for its
+    /// found report, as a renewal answers it.
     pub async fn claim(
         &self,
         machine: &Machine,
         engine: &EngineLine,
+        claim: &Claim,
+    ) -> Result<ClaimAnswer, PortError> {
+        let runner = runner_of(machine, engine);
+        match self.claim_run(machine, engine, &runner, claim).await? {
+            Some(run) => Ok(ClaimAnswer::Run(Box::new(run))),
+            None => Ok(ClaimAnswer::Idle(Idle {
+                scan: self.store.scan_requested(&runner).await?.is_some(),
+            })),
+        }
+    }
+
+    async fn claim_run(
+        &self,
+        machine: &Machine,
+        engine: &EngineLine,
+        runner: &str,
         claim: &Claim,
     ) -> Result<Option<Claimed>, PortError> {
         let now = self.clock.now();
@@ -177,8 +195,7 @@ impl<C: Clock> EnginePort<C> {
         if !registered.iter().any(|e| &e.engine == engine) {
             return Err(PortError::UnknownEngine);
         }
-        let runner = runner_of(machine, engine);
-        self.store.seen(&runner, None, now).await?;
+        self.store.seen(runner, None, now).await?;
         if self.in_window(machine, now).await? {
             return Ok(None);
         }

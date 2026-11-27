@@ -64,6 +64,45 @@ pub struct Claimed {
     pub variables: BTreeMap<String, Value>,
 }
 
+/// A claim's empty answer when it has something to tell: no run to hand
+/// out now. An empty answer with nothing to tell is a bare 204, as before.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Idle {
+    /// Someone asked for a scan, as in [`Renewed::scan`]: it reaches a
+    /// runner with no run to renew. Sent only when true, and at each claim
+    /// until the runner's next found report.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scan: bool,
+}
+
+/// What a claim answers: a run, or none. On the wire a run and an [`Idle`]
+/// are bodies of a 200 (an [`Idle`] has no `run`), and a 204 is
+/// `Idle::default()`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ClaimAnswer {
+    Run(Box<Claimed>),
+    Idle(Idle),
+}
+
+impl ClaimAnswer {
+    /// The run handed out, if one was.
+    #[must_use]
+    pub fn run(self) -> Option<Claimed> {
+        match self {
+            Self::Run(run) => Some(*run),
+            Self::Idle(_) => None,
+        }
+    }
+
+    /// Whether the answer asks for a scan.
+    #[must_use]
+    pub fn scan(&self) -> bool {
+        matches!(self, Self::Idle(Idle { scan: true }))
+    }
+}
+
 /// How far a run is.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

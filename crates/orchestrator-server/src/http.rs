@@ -13,8 +13,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{post, put};
 use axum::{Json, Router};
 use engine_port::{
-    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Lock, Logs, Pools, Release,
-    Renew,
+    Claim, ClaimAnswer, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Lock, Logs,
+    Pools, Release, Renew,
 };
 use orchestration_model::{EngineLine, EngineName, Line};
 use serde_json::json;
@@ -179,8 +179,9 @@ async fn claim<C: Clock>(
 ) -> Result<Response, ApiError> {
     let e = engine_line(&engine, &line)?;
     match s.port.claim(&m, &e, &c).await? {
-        Some(run) => Ok(Json(run).into_response()),
-        None => Ok(StatusCode::NO_CONTENT.into_response()),
+        ClaimAnswer::Run(run) => Ok(Json(run).into_response()),
+        ClaimAnswer::Idle(idle) if idle.scan => Ok(Json(idle).into_response()),
+        ClaimAnswer::Idle(_) => Ok(StatusCode::NO_CONTENT.into_response()),
     }
 }
 

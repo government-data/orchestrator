@@ -1,13 +1,14 @@
 //! A scan on request: asked of one runner, answered `scan` at each of its
 //! renewals until its next found report, never to another runner's run;
-//! refused for a runner that never reported what it found.
+//! refused for a runner that never reported what it found. A runner with no
+//! run is told in the claim's empty answer.
 
 mod common;
 
 use axum::http::{Method, StatusCode};
 use chrono::Duration;
 use common::{engine, harness, Harness};
-use orchestrator_server::{EnginePort, Machine, ScanAsked};
+use orchestrator_server::{Clock, EnginePort, Machine, ScanAsked};
 use serde_json::{json, Value};
 
 const RUNNER: &str = "machine-1/fake-engine/-";
@@ -142,4 +143,55 @@ async fn a_scan_is_told_at_each_renewal_until_the_next_found_report() {
         None,
         "its report answered the scan"
     );
+}
+
+/// A claim from `machine` with nothing queued.
+async fn empty(h: &Harness, machine: &str) -> (StatusCode, Value) {
+    h.call(
+        Method::POST,
+        "/internal/engines/fake-engine/-/claim",
+        Some(machine),
+        json!({"runner": "r1"}),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn an_empty_claim_says_scan_until_the_next_found_report() {
+    let h = harness().await;
+    for m in ["machine-1", "machine-2"] {
+        register(&h, m).await;
+        report_found(&h, m).await;
+    }
+    assert_eq!(empty(&h, "machine-1").await.0, StatusCode::NO_CONTENT);
+    assert_eq!(ask(&h, "machine-1").await, ScanAsked::Asked);
+    assert_eq!(
+        empty(&h, "machine-1").await,
+        (StatusCode::OK, json!({"scan": true}))
+    );
+    assert_eq!(
+        empty(&h, "machine-1").await,
+        (StatusCode::OK, json!({"scan": true})),
+        "told again until it reports"
+    );
+    assert_eq!(
+        empty(&h, "machine-2").await.0,
+        StatusCode::NO_CONTENT,
+        "another machine's runner is not asked"
+    );
+
+    let until = h.clock.now() + Duration::minutes(30);
+    h.post(
+        "/internal/engines/fake-engine/hold",
+        json!({"hold": "h-1", "until": until}),
+    )
+    .await;
+    assert_eq!(
+        empty(&h, "machine-1").await,
+        (StatusCode::OK, json!({"scan": true})),
+        "held: no run, still the scan"
+    );
+
+    report_found(&h, "machine-1").await;
+    assert_eq!(empty(&h, "machine-1").await.0, StatusCode::NO_CONTENT);
 }
