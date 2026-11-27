@@ -91,11 +91,11 @@ PY
 
 # --- RustFS, one warehouse ----------------------------------------------------
 et_rustfs() {
-  printf '%s' "qo$(openssl rand -hex 8)" >"$D/secrets/lake-access-key"
-  openssl rand -hex 20 | tr -d '\n' >"$D/secrets/lake-secret-key"
+  printf '%s' "qo$(openssl rand -hex 8)" >"$D/secrets/lake-query-engine-access-key"
+  openssl rand -hex 20 | tr -d '\n' >"$D/secrets/lake-query-engine-secret-key"
   docker run -d --name "$P-lake" --network "$P" --memory 1g \
-    -e RUSTFS_ACCESS_KEY="$(cat "$D/secrets/lake-access-key")" \
-    -e RUSTFS_SECRET_KEY="$(cat "$D/secrets/lake-secret-key")" \
+    -e RUSTFS_ACCESS_KEY="$(cat "$D/secrets/lake-query-engine-access-key")" \
+    -e RUSTFS_SECRET_KEY="$(cat "$D/secrets/lake-query-engine-secret-key")" \
     -e RUSTFS_VOLUMES=/data "$RUSTFS_IMAGE" server --address :9000 >/dev/null || return 1
   for _ in $(seq 1 30); do
     docker exec "$P-lake" curl -s -o /dev/null http://127.0.0.1:9000/health 2>/dev/null && break
@@ -103,7 +103,7 @@ et_rustfs() {
   done
   local p
   for p in "/$WAREHOUSE" "/iceberg/v1/buckets/$WAREHOUSE"; do
-    docker exec -e AK="$(cat "$D/secrets/lake-access-key")" -e SK="$(cat "$D/secrets/lake-secret-key")" \
+    docker exec -e AK="$(cat "$D/secrets/lake-query-engine-access-key")" -e SK="$(cat "$D/secrets/lake-query-engine-secret-key")" \
       "$P-lake" sh -c "curl -sS -o /dev/null -w '%{http_code}' -X PUT --user \"\$AK:\$SK\" \
       --aws-sigv4 aws:amz:us-east-1:s3 http://127.0.0.1:9000$p" | grep -q 200 || {
       echo "warehouse: $p refused"; return 1
@@ -134,17 +134,18 @@ et_coordinator() {
   chmod 600 "$D/node/machine.pem"
   et_tq_script
   docker run -d --name "$P-coordinator" --hostname "$P-coordinator" --network "$P" --memory 3g \
+    --sysctl net.ipv4.ip_unprivileged_port_start=443 \
     --entrypoint /etc/trino-module/entrypoint.sh \
-    -e TRINO_NODE_ID=coordinator -e TRINO_NODE_NAME="$P-coordinator" \
-    -e TRINO_DISCOVERY_URI="https://$P-coordinator:8490" \
+    -e TRINO_NODE_ID=coordinator -e TRINO_INTERNAL_ADDRESS="$P-coordinator" \
+    -e TRINO_DISCOVERY_URI="https://$P-coordinator" \
     -e TRINO_JWT_ISSUER=https://core.test/api -e TRINO_JWKS_URL="http://$P-core:8000/jwks.json" \
     -e TRINO_RULES_URL="http://$P-core:8000/rules.json" \
     -e TRINO_LAKE_S3_URL="http://$P-lake:9000" -e TRINO_LAKE_WAREHOUSE="$WAREHOUSE" \
     "${envs[@]}" \
     -v "$MODULE/trino:/etc/trino-module:ro" -v "$D/node:/run/qd-node:ro" -v "$D/bin:/verify:ro" \
     -v "$D/secrets/trino-shared-secret:/run/secrets/trino-shared-secret:ro" \
-    -v "$D/secrets/lake-access-key:/run/secrets/lake-access-key:ro" \
-    -v "$D/secrets/lake-secret-key:/run/secrets/lake-secret-key:ro" \
+    -v "$D/secrets/lake-query-engine-access-key:/run/secrets/lake-query-engine-access-key:ro" \
+    -v "$D/secrets/lake-query-engine-secret-key:/run/secrets/lake-query-engine-secret-key:ro" \
     --tmpfs /spill:uid=1000,gid=1000 "$TRINO_IMAGE" >/dev/null || return 1
   for _ in $(seq 1 90); do
     docker logs "$P-coordinator" 2>&1 | grep -q "SERVER STARTED" && return 0
@@ -163,7 +164,7 @@ et_tq_script() {
 # tq.sh SQL (token in T): the statement polled to its end; the rows as JSON,
 # or "failed: <error name>" or "http <code>", exit 1.
 call() { curl -sS -w '\n%{http_code}' --cacert /run/qd-node/ca.crt -H "Authorization: Bearer $T" "$@"; }
-r=$(call --data-binary "$1" https://localhost:8490/v1/statement)
+r=$(call --data-binary "$1" https://localhost/v1/statement)
 while :; do
   code=${r##*$'\n'} body=${r%$'\n'*}
   [ "$code" = 200 ] || { echo "http $code"; exit 1; }

@@ -60,7 +60,7 @@ pid=$(tq "$admin" "SELECT query_id FROM system.runtime.queries WHERE user LIKE '
 expect_match "a person's session limits (BI, tier xs)" \
   "'query_max_memory': '600MB'.*|.*'spill_enabled': 'false'" \
   "$(docker exec -e T="$admin" "$P-coordinator" curl -sS --cacert /run/qd-node/ca.crt \
-    -H "Authorization: Bearer $admin" "https://localhost:8490/v1/query/$pid" |
+    -H "Authorization: Bearer $admin" "https://localhost/v1/query/$pid" |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["session"]["systemProperties"])')"
 tq_refused "RE2J: a backreference is refused" "$admin" "SELECT regexp_like('aa', '(a)\\1')" "failed"
 expect "spill on" "spill-enabled=true" \

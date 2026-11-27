@@ -41,7 +41,7 @@ info "10 s after the client left: $now"
 qid=$(printf '%s' "$now" | sed -n 's/^\[\["\([^"]*\)".*/\1/p')
 if [ -n "$qid" ]; then
   docker exec "$P-coordinator" curl -s -o /dev/null -X DELETE --cacert /run/qd-node/ca.crt \
-    -H "Authorization: Bearer $admin" "https://localhost:8490/v1/query/$qid"
+    -H "Authorization: Bearer $admin" "https://localhost/v1/query/$qid"
   for _ in $(seq 1 30); do [ -z "$(running)" ] && break; sleep 1; done
   expect "killed by id: nothing committed" '[[0]]' "$(tq "$admin" "SELECT count(*) FROM $T")"
 else
@@ -71,7 +71,7 @@ for _ in $(seq 1 30); do out=$(tq "$admin" "SELECT count(*) FROM $T"); case "$ou
 expect "no partial commit across the restart" '[[1]]' "$out"
 # A page of a query from before the restart.
 code=$(docker exec "$P-coordinator" curl -s -o /dev/null -w '%{http_code}' --cacert /run/qd-node/ca.crt \
-  -H "Authorization: Bearer $admin" "https://localhost:8490/v1/statement/executing/20261125_000000_00001_aaaaa/y0/1")
+  -H "Authorization: Bearer $admin" "https://localhost/v1/statement/executing/20261125_000000_00001_aaaaa/y0/1")
 expect "a page of a query the coordinator no longer knows" "404" "$code"
 
 [ "$FAILED" = 0 ] && echo "ALL OK" || { echo "SOME CHECKS FAILED"; exit 1; }

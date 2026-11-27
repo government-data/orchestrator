@@ -43,8 +43,8 @@ secret() { # the first line of a secret file
   printf '%s' "$line"
 }
 TRINO_SHARED_SECRET=$(secret /run/secrets/trino-shared-secret)
-TRINO_LAKE_ACCESS_KEY=$(secret /run/secrets/lake-access-key)
-TRINO_LAKE_SECRET_KEY=$(secret /run/secrets/lake-secret-key)
+TRINO_LAKE_ACCESS_KEY=$(secret /run/secrets/lake-query-engine-access-key)
+TRINO_LAKE_SECRET_KEY=$(secret /run/secrets/lake-query-engine-secret-key)
 export TRINO_SHARED_SECRET TRINO_LAKE_ACCESS_KEY TRINO_LAKE_SECRET_KEY
 
 # The core's keys: Trino 484 verifies RSA and EC keys from files; a P-256

@@ -71,7 +71,7 @@ for _ in $(seq 1 60); do
   [ -n "$qid" ] && break; sleep 0.5
 done
 code=$(docker exec -e T="$rules" "$P-coordinator" curl -s -o /dev/null -w '%{http_code}' -X DELETE \
-  --cacert /run/qd-node/ca.crt -H "Authorization: Bearer $rules" "https://localhost:8490/v1/query/$qid")
+  --cacert /run/qd-node/ca.crt -H "Authorization: Bearer $rules" "https://localhost/v1/query/$qid")
 expect_match "rules: kills its own query ($qid)" '^20[04]$' "$code"
 
 expect "report: its gold rows" '[["loans"],["loans"]]' "$(tq "$report" "SELECT dataset FROM $G ORDER BY n")"

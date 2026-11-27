@@ -12,8 +12,14 @@
 # same digest query-trino mirrors), IMAGE_PROXY the Traefik mirrored beside
 # it, IMAGE_ENGINE_TRINO this module's own image (Dockerfile).
 #
-# - `coordinator`: Trino's coordinator (trino/), HTTPS on TRINO_PORT with
-#   the master's machine certificate, for the workers and the consumers.
+# - `coordinator`: Trino's coordinator (trino/), HTTPS on 443 inside its
+#   container with the master's machine certificate, which carries the SAN
+#   trino.<master's name>. It publishes no port (ruling 71 of decision
+#   0011): the core's Traefik passes TLS whose SNI is trino.<master's name>
+#   through, unterminated, from the master's 443 to engine-trino-coordinator:443
+#   on data-quality-edge (ruling 90). Workers and consumers reach it there
+#   as https://trino.<master's name>; the runners on the module's network
+#   by the same name (a network alias), not through Traefik.
 # - `lake-proxy`: in the coordinator's network namespace, the loopback way
 #   to the lake's gate with the machine's certificate (proxy/).
 # - `rules`: Trino's rules, merged from the core's grants (trino-rules).
@@ -28,14 +34,30 @@
 # TRINO_LAKE_WAREHOUSE,
 # QD_OIDC_MACHINE_CLIENT_ID (the module's machine client; its secret is
 # the agent's oidc-machine-secret file).
-# Optional: TRINO_TIER (s), TRINO_PORT (8490), TRINO_WORKERS, RUNNER_CONCURRENCY (1).
+# Optional: TRINO_TIER (s), TRINO_WORKERS, RUNNER_CONCURRENCY (1).
 #
-# The master's machine name resolves to the host in `rules` and `runner`
-# (host-gateway), where the core's Traefik passes it on 443 by SNI.
+# The lake user's keys are the fixed role-secret names of query engines,
+# lake-query-engine-access-key and lake-query-engine-secret-key (rulings 51
+# and 89), the same keys query-trino's workers get.
+#
+# Names (ruling 91): the master's own names are this file's: its machine
+# name resolves to the host (host-gateway), where the core's Traefik passes
+# it on 443 by SNI; trino.<name> is the coordinator itself (loopback there,
+# a network alias for the others). Every other machine's names (the lake,
+# the workers) come from hosts.yml, a compose override the update agent
+# writes beside .env from the core's list of machines and adds after this
+# file (`--file compose.yml --file ../hosts.yml`): an `extra_hosts` entry
+# `<name>:<IPv4>` for each name of each other live machine, on each service
+# with its own network namespace (not `lake-proxy`, which shares the
+# coordinator's). Docker's DNS does not read the host's /etc/hosts.
 name: engine-trino
 
 networks:
   engine: {}
+  # Where the core's Traefik reaches the coordinator (ruling 90).
+  edge:
+    name: data-quality-edge
+    external: true
 
 volumes:
   coordinator-data: {}
@@ -44,10 +66,10 @@ volumes:
 secrets:
   trino-shared-secret:
     file: ${QD_SECRETS_DIR:?}/trino-shared-secret
-  lake-access-key:
-    file: ${QD_SECRETS_DIR:?}/lake-access-key
-  lake-secret-key:
-    file: ${QD_SECRETS_DIR:?}/lake-secret-key
+  lake-query-engine-access-key:
+    file: ${QD_SECRETS_DIR:?}/lake-query-engine-access-key
+  lake-query-engine-secret-key:
+    file: ${QD_SECRETS_DIR:?}/lake-query-engine-secret-key
   oidc-machine-secret:
     file: ${QD_SECRETS_DIR:?}/oidc-machine-secret
 
@@ -57,21 +79,29 @@ services:
     restart: unless-stopped
     user: "1000:1000"
     entrypoint: ["/etc/trino-module/entrypoint.sh"]
-    networks: [engine]
-    ports: ["${TRINO_PORT:-8490}:8490"]
+    networks:
+      engine:
+        aliases: ["trino.${TRINO_NODE_NAME:?}"]
+      edge:
+        aliases: [engine-trino-coordinator]
+    # Trino runs as uid 1000 and listens on 443 in its own namespace.
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 443
     stop_grace_period: 2m
-    secrets: [trino-shared-secret, lake-access-key, lake-secret-key]
+    secrets: [trino-shared-secret, lake-query-engine-access-key, lake-query-engine-secret-key]
     environment:
       TRINO_TIER: ${TRINO_TIER:-s}
       TRINO_NODE_ID: coordinator
-      TRINO_NODE_NAME: ${TRINO_NODE_NAME:?}
-      TRINO_DISCOVERY_URI: https://${TRINO_NODE_NAME:?}:${TRINO_PORT:-8490}
+      TRINO_INTERNAL_ADDRESS: trino.${TRINO_NODE_NAME:?}
+      TRINO_DISCOVERY_URI: https://trino.${TRINO_NODE_NAME:?}
       TRINO_JWT_ISSUER: ${QD_OIDC_ISSUER:?}
       TRINO_JWKS_URL: ${QD_OIDC_ISSUER:?}/oauth/jwks
       TRINO_RULES_URL: http://rules:8070/rules.json
       TRINO_LAKE_S3_URL: http://127.0.0.1:9000
       TRINO_LAKE_WAREHOUSE: ${TRINO_LAKE_WAREHOUSE:?}
-    extra_hosts: ["${TRINO_NODE_NAME:?}:127.0.0.1"]
+    extra_hosts:
+      - "trino.${TRINO_NODE_NAME:?}:127.0.0.1"
+      - "${TRINO_NODE_NAME:?}:host-gateway"
     volumes:
       - ./trino:/etc/trino-module:ro
       - ${QD_MACHINE_DIR:?}:/run/qd-node:ro
@@ -144,7 +174,7 @@ services:
       CORE_URL: ${CORE_URL:?}
       QD_OIDC_ISSUER: ${QD_OIDC_ISSUER:?}
       QD_OIDC_MACHINE_CLIENT_ID: ${QD_OIDC_MACHINE_CLIENT_ID:?}
-      TRINO_URL: https://${TRINO_NODE_NAME:?}:${TRINO_PORT:-8490}
+      TRINO_URL: https://trino.${TRINO_NODE_NAME:?}
       TRINO_VERSION: "484"
       TRINO_TIER: ${TRINO_TIER:-s}
       RUNNER_CONCURRENCY: ${RUNNER_CONCURRENCY:-1}
