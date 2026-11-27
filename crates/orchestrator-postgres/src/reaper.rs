@@ -79,8 +79,8 @@ impl PgStore {
     }
 
     /// Queues the repetition of `run`; `None` if it was repeated already.
-    /// It copies the run (its engine, line, parameters and fire), not
-    /// leased, on any cluster the flow allows.
+    /// It copies the run (its engine, line, parameters, fire and chain
+    /// step), not leased, on any cluster the flow allows.
     pub async fn queue_retry(
         &self,
         run: &str,
@@ -91,10 +91,11 @@ impl PgStore {
         let id = sqlx::query_scalar(
             "INSERT INTO runs (flow_id, engine, line, kind, cluster, trigger, triggered_by,
                                schedule_id, fire_at, parameters, timeout_secs, lock_name,
-                               slot_pool, attempt, retry_of, resume, not_before, queued_at)
+                               slot_pool, attempt, retry_of, resume, not_before, queued_at,
+                               chain_id, chain_step)
              SELECT r.flow_id, r.engine, r.line, r.kind, f.cluster, r.trigger, r.triggered_by,
                     r.schedule_id, r.fire_at, r.parameters, r.timeout_secs, r.lock_name,
-                    r.slot_pool, $2, r.id, $3, $4, $5
+                    r.slot_pool, $2, r.id, $3, $4, $5, r.chain_id, r.chain_step
                FROM runs r JOIN flows f ON f.id = r.flow_id
               WHERE r.id = $1::uuid
              ON CONFLICT (retry_of) WHERE retry_of IS NOT NULL DO NOTHING

@@ -4,6 +4,7 @@
 //! 0009); its migrations only add.
 
 mod adoption;
+mod chains;
 mod deploys;
 mod engines;
 mod flows;
@@ -18,6 +19,7 @@ mod variables;
 mod windows;
 
 pub use adoption::Adoption;
+pub use chains::{ChainsMoved, NewChain};
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use engines::{LiveRunners, RegisteredEngine};
 pub use flows::NewFlow;
