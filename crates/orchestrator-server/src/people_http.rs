@@ -10,7 +10,8 @@
 //! | `POST /api/v1/scans`       | ask a runner to report what it finds now       |
 //!
 //! Flows and folders are read in [`crate::people_views`], runs and their
-//! logs in [`crate::people_runs`].
+//! logs in [`crate::people_runs`]; a flow is run and a run cancelled in
+//! [`crate::people_run`].
 
 use std::sync::Arc;
 
@@ -49,7 +50,8 @@ pub fn people_router<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
         .route("/api/v1/scans", post(scan::<C>))
         .with_state(Arc::clone(&state))
         .merge(crate::people_views::routes(Arc::clone(&state)))
-        .merge(crate::people_runs::routes(state))
+        .merge(crate::people_runs::routes(Arc::clone(&state)))
+        .merge(crate::people_run::routes(state))
 }
 
 pub(crate) fn error(status: StatusCode, why: &str) -> Response {
