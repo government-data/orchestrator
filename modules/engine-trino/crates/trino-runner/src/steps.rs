@@ -69,6 +69,13 @@ pub(crate) fn check(bundle: &Bundle) -> Result<(), &'static str> {
         }
     }
     for (i, st) in bundle.statements.iter().enumerate() {
+        if st
+            .lock
+            .as_deref()
+            .is_some_and(|l| !crate::locks::is_table_lock(l))
+        {
+            return Err("bad lock");
+        }
         if let Expects::Values { columns, max_rows } = &st.expects {
             let bounded = (1..=crate::bundle::MAX_VALUES_ROWS).contains(max_rows);
             if columns.is_empty() || !bounded || st.run_as != crate::bundle::RunAs::Job {

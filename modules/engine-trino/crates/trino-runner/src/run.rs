@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::bundle::{Bundle, Expects, PlaceholderType, RunAs, Statement};
 use crate::check::{class, fits, Answer};
 use crate::engine::{transient, TrinoEngine};
+use crate::locks::Locks;
 use crate::ports::{Core, Trino, TrinoUser};
 use crate::report::{StatementState, Trail};
 use crate::steps::{checked, column, fill, Known};
@@ -22,9 +23,10 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         bundle: &Bundle,
         (from, mut known): (usize, Known),
         token: &str,
-        ctx: &RunContext,
+        locks: &mut Locks<'_>,
         trail: &mut Trail,
     ) -> Outcome {
+        let ctx = locks.ctx;
         let total = bundle.statements.len();
         let (mut written, mut skipped) = (0u64, 0u64);
         let mut report_token = None;
@@ -33,18 +35,20 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             trail.push(&st.id, StatementState::Done);
         }
         for (i, st) in bundle.statements.iter().enumerate().skip(from) {
-            if let Some(o) = &st.only_if_rows {
-                match known.0.get(&format!("c.{}", o.after)).map(String::as_str) {
-                    Some("0") => {
-                        ctx.log(LogStream::System, &format!("statement {} skipped", st.id));
-                        trail.push(&st.id, StatementState::Skipped);
-                        skipped += 1;
-                        ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
-                        continue;
-                    }
-                    Some(_) => {}
-                    None => return failed(trail, st, Outcome::failed("step_value_missing")),
+            if let Err(o) = locks.before(i).await {
+                return failed(trail, st, o);
+            }
+            match skips(st, &known) {
+                Ok(false) => {}
+                Ok(true) => {
+                    ctx.log(LogStream::System, &format!("statement {} skipped", st.id));
+                    trail.push(&st.id, StatementState::Skipped);
+                    skipped += 1;
+                    ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
+                    locks.after(i).await;
+                    continue;
                 }
+                Err(o) => return failed(trail, st, o),
             }
             let token = match st.run_as {
                 RunAs::Job => token.to_string(),
@@ -81,6 +85,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             }
             trail.done(&st.id, &st.expects, &answer.rows);
             ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
+            locks.after(i).await;
             // Sends "statement i done" with the renewal now, not in 30 s.
             if let Some(id) = &answer.query_id {
                 ctx.engine_ref(id);
@@ -185,6 +190,18 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                     .map_err(|f| f.kind)
             }
         }
+    }
+}
+
+/// Whether `st` is skipped: the count its `only_if_rows` names was 0.
+fn skips(st: &Statement, known: &Known) -> Result<bool, Outcome> {
+    let Some(o) = &st.only_if_rows else {
+        return Ok(false);
+    };
+    match known.0.get(&format!("c.{}", o.after)).map(String::as_str) {
+        Some("0") => Ok(true),
+        Some(_) => Ok(false),
+        None => Err(Outcome::failed("step_value_missing")),
     }
 }
 
