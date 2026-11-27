@@ -6,6 +6,7 @@ mod clock;
 mod core_api;
 mod core_schedules;
 mod deploys;
+mod events;
 mod found;
 mod http;
 mod identity;
@@ -26,6 +27,10 @@ pub use core_api::{
     CoreToken, HttpEffectiveActions, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE,
 };
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
+pub use events::{
+    iam_changes_once, watch_iam_changes, CoreEvents, Event, HttpEvents, Published, Received,
+    IAM_CHANGED,
+};
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
 pub use machines::MachineList;
