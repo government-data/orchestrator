@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "orchestrator.run.started v1",
+  "description": "A runner claimed a run: its ids, attempt, engine and kind. No parameter, value or person.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "attempt", "started_at", "engine", "line", "kind"],
+  "properties": {
+    "run_id": { "$ref": "#/$defs/id" },
+    "chain_id": { "$ref": "#/$defs/id" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "started_at": { "type": "string", "format": "date-time" },
+    "engine": { "type": "string", "maxLength": 64 },
+    "line": { "type": "string", "maxLength": 64 },
+    "kind": { "type": "string" }
+  },
+  "$defs": {
+    "id": { "type": "string", "format": "uuid" }
+  }
+}
