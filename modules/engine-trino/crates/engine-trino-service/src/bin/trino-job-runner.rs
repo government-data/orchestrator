@@ -2,7 +2,7 @@
 //! orchestrator and runs the core's signed bundles on the coordinator.
 //!
 //! Settings: `ORCHESTRATOR_URL` (its route on the `internal` entry point),
-//! `CORE_URL`, `TRINO_URL` (`https://<coordinator>:8490`), `TRINO_VERSION`
+//! `CORE_URL`, `TRINO_URL` (`https://trino.<master's name>`), `TRINO_VERSION`
 //! (the coordinator's release), `QD_OIDC_ISSUER` (the provider, whose JWKS
 //! verifies the bundles), `QD_OIDC_MACHINE_CLIENT_ID` and the machine
 //! secret file, `QD_MACHINE_DIR` (default `/run/qd-node`),

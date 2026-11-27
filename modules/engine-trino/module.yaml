@@ -39,19 +39,21 @@ oidc:
     capabilities: [orchestration]
 
 # Generated once by the installation, never written by a person: the
-# coordinator's internal shared secret (the core hands it to trino-worker
-# machines over mTLS) and its lake user's keys (the lake adapter makes the
-# user). Trino runs as uid 1000.
+# coordinator's internal shared secret and its lake user's keys, under the
+# fixed names of a query engine's lake keys (rulings 51 and 89). The same
+# values must reach query-trino's `trino-worker` role, which declares them
+# as role secrets; the core makes the lake user when they arrive. Trino
+# runs as uid 1000.
 secrets:
   uid: 1000
   generate:
     - name: trino-shared-secret
       bytes: 32
       critical: true
-    - name: lake-access-key
+    - name: lake-query-engine-access-key
       bytes: 16
       critical: true
-    - name: lake-secret-key
+    - name: lake-query-engine-secret-key
       bytes: 32
       critical: true
 

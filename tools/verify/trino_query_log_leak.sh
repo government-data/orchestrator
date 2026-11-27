@@ -65,7 +65,7 @@ tq_refused "a person: system.runtime.queries" "$ana" "SELECT count(*) FROM syste
 tq_refused "a job: system.runtime.queries" "$sample" "SELECT count(*) FROM system.runtime.queries" "PERMISSION_DENIED"
 tq_ok "qd-admin: system.runtime.queries" "$admin" "SELECT count(*) FROM system.runtime.queries"
 
-objects=$(docker exec -e AK="$(cat "$D/secrets/lake-access-key")" -e SK="$(cat "$D/secrets/lake-secret-key")" \
+objects=$(docker exec -e AK="$(cat "$D/secrets/lake-query-engine-access-key")" -e SK="$(cat "$D/secrets/lake-query-engine-secret-key")" \
   "$P-lake" sh -c "curl -sS --user \"\$AK:\$SK\" --aws-sigv4 aws:amz:us-east-1:s3 \
   'http://127.0.0.1:9000/$WAREHOUSE?list-type=2'" | grep -o '<Key>[^<]*</Key>' | grep -vc '/data/\|/metadata/')
 expect "no object outside the tables' data and metadata" "0" "$objects"
