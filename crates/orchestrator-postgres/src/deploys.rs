@@ -67,7 +67,8 @@ impl PgStore {
     }
 
     /// Hands `runner` the deploy it claimed and did not finish, else the
-    /// oldest queued one of `engine` on `cluster`.
+    /// oldest queued one of `engine` on `cluster`; none while the engine is
+    /// paused or held.
     pub async fn claim_deploy(
         &self,
         engine: &EngineLine,
@@ -194,6 +195,8 @@ WITH pick AS (
       FROM deploys d
      WHERE d.engine = $1 AND d.line = $2 AND d.cluster = $3
        AND (d.state = 'queued' OR (d.state = 'claimed' AND d.runner = $4))
+       AND NOT EXISTS (SELECT 1 FROM engine_pauses p WHERE p.engine = d.engine)
+       AND NOT EXISTS (SELECT 1 FROM engine_holds h WHERE h.engine = d.engine AND h.until > $5)
      ORDER BY d.state = 'claimed' DESC, d.queued_at, d.id
      LIMIT 1
        FOR UPDATE OF d SKIP LOCKED

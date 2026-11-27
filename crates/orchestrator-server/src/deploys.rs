@@ -12,7 +12,10 @@ use crate::{runner_of, Clock, EnginePort, Machine, PortError};
 
 impl<C: Clock> EnginePort<C> {
     /// Hands the runner a deploy of its engine and line on its machine, or
-    /// none; the one it claimed and did not finish first.
+    /// none; the one it claimed and did not finish first. Like a run's
+    /// claim, none while the engine is paused or held, or the machine's
+    /// cluster is in an open maintenance window: not even the deploy it
+    /// claimed, which it takes up again once that ends.
     pub async fn claim_deploy(
         &self,
         machine: &Machine,
@@ -26,6 +29,9 @@ impl<C: Clock> EnginePort<C> {
         }
         let runner = runner_of(machine, engine);
         self.store.seen(&runner, None, now).await?;
+        if self.in_window(machine, now).await? {
+            return Ok(None);
+        }
         let instance = format!("{runner}/{}", claim.runner);
         let claimed = self
             .store

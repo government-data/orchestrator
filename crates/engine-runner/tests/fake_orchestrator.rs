@@ -55,3 +55,18 @@ async fn a_hold_stops_claims_and_renewals_say_held() {
     fake.hold(false);
     assert!(fake.claim(&d, &claim).await.unwrap().is_some());
 }
+
+#[tokio::test]
+async fn a_hold_stops_deploy_claims_too() {
+    let fake = FakeOrchestrator::default();
+    let d = FakeEngine::default().descriptor();
+    let claim = Claim { runner: "r".into() };
+    let id = fake.queue_import("/srv/found/a");
+    let claimed = fake.claim_deploy(&d, &claim).await.unwrap().unwrap();
+    assert_eq!(claimed.deploy, id);
+    fake.hold(true);
+    assert!(fake.claim_deploy(&d, &claim).await.unwrap().is_none());
+    fake.hold(false);
+    let again = fake.claim_deploy(&d, &claim).await.unwrap().unwrap();
+    assert_eq!(again.deploy, id, "taken up again once released");
+}

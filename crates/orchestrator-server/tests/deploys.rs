@@ -5,7 +5,9 @@
 mod common;
 
 use axum::http::{Method, StatusCode};
+use chrono::Duration;
 use common::harness;
+use orchestration_model::{EngineName, MaintenanceWindow, OnSchedule, WindowTime};
 use orchestrator_postgres::NewDeploy;
 use orchestrator_server::Clock;
 use serde_json::{json, Value};
@@ -84,4 +86,69 @@ async fn a_runner_claims_a_deploy_on_its_machine_and_finishes_it_once() {
         .post("/internal/deploys/not-a-deploy/finish", finish(false))
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn a_deploy_is_not_handed_out_while_its_engine_is_held_or_paused() {
+    let h = harness().await;
+    h.register().await;
+    let id = queue(&h, "machine-1").await;
+    let runner = json!({"runner": "r1"});
+    let (_, claimed) = h.post(CLAIM, runner.clone()).await;
+    assert_eq!(claimed["deploy"], id.as_str());
+
+    let until = h.clock.now() + Duration::minutes(30);
+    let hold = json!({"hold": "h-1", "until": until});
+    let (status, _) = h.post("/internal/engines/fake-engine/hold", hold).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = h.post(CLAIM, runner.clone()).await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "held: not even the deploy it claimed"
+    );
+    h.post(
+        "/internal/engines/fake-engine/release",
+        json!({"hold": "h-1"}),
+    )
+    .await;
+    let (_, again) = h.post(CLAIM, runner.clone()).await;
+    assert_eq!(again["deploy"], id.as_str(), "released: taken up again");
+
+    let engine = EngineName::new("fake-engine").unwrap();
+    h.store
+        .pause_engine(&engine, "upgrade", None, h.clock.now())
+        .await
+        .unwrap();
+    let (status, _) = h.post(CLAIM, runner.clone()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "paused");
+    h.store.resume_engine(&engine).await.unwrap();
+    let (status, _) = h.post(CLAIM, runner).await;
+    assert_eq!(status, StatusCode::OK, "resumed");
+}
+
+#[tokio::test]
+async fn a_deploy_is_not_handed_out_in_a_maintenance_window_of_its_cluster() {
+    let h = harness().await;
+    h.register().await;
+    let id = queue(&h, "machine-1").await;
+    let now = h.clock.now();
+    let window = MaintenanceWindow {
+        id: String::new(),
+        name: "upgrade".into(),
+        time: WindowTime::Once {
+            starts_at: now - Duration::minutes(5),
+            ends_at: now + Duration::minutes(5),
+        },
+        on_schedule: OnSchedule::Skip,
+        enabled: true,
+        clusters: vec!["machine-1".into()],
+    };
+    h.store.save_window(&window).await.unwrap();
+    let runner = json!({"runner": "r1"});
+    let (status, _) = h.post(CLAIM, runner.clone()).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "in its window");
+    h.clock.advance(Duration::minutes(10));
+    let (_, claimed) = h.post(CLAIM, runner).await;
+    assert_eq!(claimed["deploy"], id.as_str(), "after it");
 }

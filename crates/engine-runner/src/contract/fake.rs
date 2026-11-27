@@ -203,8 +203,8 @@ impl FakeOrchestrator {
         self.with(|s| s.found.clone())
     }
 
-    /// The engine's drain hold on or off: while on, claims get nothing and
-    /// renewals answer `held`.
+    /// The engine's drain hold on or off: while on, run and deploy claims
+    /// get nothing and renewals answer `held`.
     pub fn hold(&self, on: bool) {
         self.with(|s| s.held = on);
     }
@@ -346,13 +346,16 @@ impl Orchestrator for FakeOrchestrator {
     }
 
     /// The deploy this runner claimed and did not finish, else the first
-    /// queued one.
+    /// queued one; none while held, as runs.
     async fn claim_deploy(
         &self,
         _: &Descriptor,
         c: &Claim,
     ) -> Result<Option<DeployClaimed>, CallError> {
         Ok(self.with(|s| {
+            if s.held {
+                return None;
+            }
             let mine = |d: &&mut FakeDeploy| {
                 d.finish.is_none() && d.claimed_by.as_deref() == Some(c.runner.as_str())
             };
