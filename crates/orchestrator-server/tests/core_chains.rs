@@ -124,7 +124,7 @@ async fn only_the_cores_machine_with_its_token_starts_a_chain() {
     let token = core.key.core_token(&core.clock);
     let (status, _) = send(&core.app, None, Some(&token), &tables_job()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "the token alone");
-    let module = core.key.token_of("engine-trino-machine", &core.clock);
+    let module = core.key.token_of("an-engine-machine", &core.clock);
     let (status, _) = send(&core.app, Some(CORE), Some(&module), &tables_job()).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "a module's token");
     let forged = CoreKey::new().core_token(&core.clock);
