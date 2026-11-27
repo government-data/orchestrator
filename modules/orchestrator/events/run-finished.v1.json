@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "orchestrator.run.finished v1",
+  "description": "A run ended: its ids, engine, state and error class. No parameter, value or person.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "flow_id", "engine", "line", "kind", "state", "attempt", "trigger", "finished_at"],
+  "properties": {
+    "run_id": { "$ref": "#/$defs/id" },
+    "flow_id": { "$ref": "#/$defs/id" },
+    "engine": { "type": "string", "maxLength": 64 },
+    "line": { "type": "string", "maxLength": 64 },
+    "kind": { "type": "string" },
+    "state": { "enum": ["succeeded", "failed", "timed_out", "cancelled", "lost"] },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "trigger": { "enum": ["manual", "schedule"] },
+    "retry_of": { "$ref": "#/$defs/id" },
+    "chain_id": { "$ref": "#/$defs/id" },
+    "error_class": { "type": "string", "pattern": "^[a-z0-9_]{1,64}$" },
+    "interruption": {
+      "enum": ["system", "runner_stopped", "runner_restarted", "runner_lost", "runner_isolated", "low_disk"]
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "finished_at": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "id": { "type": "string", "format": "uuid" }
+  }
+}
