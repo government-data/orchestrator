@@ -21,6 +21,7 @@ mod modules;
 mod outbox;
 mod people;
 mod people_http;
+mod people_views;
 mod port;
 mod removal;
 mod scan;
@@ -55,7 +56,7 @@ pub use modules::{installed_lines, ModuleList};
 pub use outbox::{send_outbox, OutboxSent};
 pub use people::{
     person_of, CachedActions, EffectiveActions, OidcPeople, People, Person, PersonTokens, Refused,
-    IMPORT_FLOWS,
+    IMPORT_FLOWS, MANAGE_FLOWS, MANAGE_SCHEDULES, RUN_WORKFLOW, VIEW_FLOWS,
 };
 pub use people_http::{people_router, PeopleState};
 pub use port::{runner_of, EnginePort, Machine, PortError};

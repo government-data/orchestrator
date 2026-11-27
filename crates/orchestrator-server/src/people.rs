@@ -24,6 +24,18 @@ use crate::{Clock, Expected, Keys};
 /// Load what a cluster already has as flows (decision 0011, import).
 pub const IMPORT_FLOWS: &str = "orchestrator:ImportFlows";
 
+/// See flows, folders, runs and their logs (ruling of decision 0011, step 6).
+pub const VIEW_FLOWS: &str = "orchestrator:ViewFlows";
+
+/// Run a flow now, and cancel a run.
+pub const RUN_WORKFLOW: &str = "orchestrator:RunWorkflow";
+
+/// Edit, pause and resume flows and engines.
+pub const MANAGE_FLOWS: &str = "orchestrator:ManageFlows";
+
+/// Create, enable, disable and delete a flow's schedules.
+pub const MANAGE_SCHEDULES: &str = "orchestrator:ManageSchedules";
+
 /// How long the core's answer for a person is kept.
 const CACHED_FOR: Duration = Duration::seconds(60);
 

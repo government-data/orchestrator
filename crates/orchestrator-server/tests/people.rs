@@ -5,66 +5,11 @@
 
 mod common;
 
-use std::sync::{Arc, Mutex};
-
-use async_trait::async_trait;
-use axum::body::Body;
-use axum::http::{HeaderMap, Method, Request, StatusCode};
+use axum::http::{Method, StatusCode};
 use common::harness;
-use orchestrator_server::{
-    people_router, EffectiveActions, EnginePort, People, PeopleState, Person, PersonTokens,
-    IMPORT_FLOWS,
-};
+use common::people::{call, people_app, refused_each_way, FakeCore};
+use orchestrator_server::IMPORT_FLOWS;
 use serde_json::{json, Value};
-use tower::ServiceExt;
-
-/// The person a request names in `x-test-person`: only tests read it.
-struct HeaderPerson;
-
-#[async_trait]
-impl PersonTokens for HeaderPerson {
-    async fn person(&self, headers: &HeaderMap) -> Option<Person> {
-        let id = headers.get("x-test-person")?.to_str().ok()?;
-        Some(Person { id: id.into() })
-    }
-}
-
-/// The core's answer for everyone; `None`: it does not answer.
-#[derive(Clone, Default)]
-struct FakeCore(Arc<Mutex<Option<Vec<String>>>>);
-
-#[async_trait]
-impl EffectiveActions for FakeCore {
-    async fn held(&self, _person: &Person) -> Option<Vec<String>> {
-        self.0.lock().unwrap().clone()
-    }
-}
-
-async fn call(
-    app: &axum::Router,
-    method: Method,
-    uri: &str,
-    person: bool,
-    body: Value,
-) -> (StatusCode, Value) {
-    let mut req = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("content-type", "application/json");
-    if person {
-        req = req.header("x-test-person", "ana");
-    }
-    let req = req.body(Body::from(body.to_string())).unwrap();
-    let res = app.clone().oneshot(req).await.unwrap();
-    let status = res.status();
-    let bytes = axum::body::to_bytes(res.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    (
-        status,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-    )
-}
 
 const FOUND: &str = "/api/v1/found?machine=machine-1&engine=fake-engine&line=-";
 
@@ -94,33 +39,19 @@ async fn setup() -> (common::Harness, axum::Router, FakeCore) {
     let path = "/internal/engines/fake-engine/-/found";
     let (status, _) = h.call(Method::PUT, path, Some("machine-1"), report).await;
     assert_eq!(status, StatusCode::OK);
-    let core = FakeCore::default();
-    let state = PeopleState {
-        port: EnginePort::new(h.store.clone(), h.clock.clone()),
-        people: People::new(Arc::new(HeaderPerson), Arc::new(core.clone())),
-    };
-    (h, people_router(Arc::new(state)), core)
+    let (app, core) = people_app(&h);
+    (h, app, core)
 }
 
 #[tokio::test]
 async fn an_unauthorised_call_is_refused_and_changes_nothing() {
     let (h, app, core) = setup().await;
     let calls = [
-        (Method::GET, FOUND, Value::Null),
-        (Method::POST, "/api/v1/imports", import_body()),
-        (Method::POST, "/api/v1/scans", scan_body()),
+        (Method::GET, FOUND.to_string(), Value::Null),
+        (Method::POST, "/api/v1/imports".into(), import_body()),
+        (Method::POST, "/api/v1/scans".into(), scan_body()),
     ];
-    for (method, uri, body) in &calls {
-        *core.0.lock().unwrap() = Some(vec![IMPORT_FLOWS.into()]);
-        let (status, _) = call(&app, method.clone(), uri, false, body.clone()).await;
-        assert_eq!(status, StatusCode::UNAUTHORIZED, "{uri}: no person");
-        *core.0.lock().unwrap() = Some(vec!["orchestrator:Other".into()]);
-        let (status, _) = call(&app, method.clone(), uri, true, body.clone()).await;
-        assert_eq!(status, StatusCode::FORBIDDEN, "{uri}: not held");
-        *core.0.lock().unwrap() = None;
-        let (status, _) = call(&app, method.clone(), uri, true, body.clone()).await;
-        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{uri}: no answer");
-    }
+    refused_each_way(&app, &core, IMPORT_FLOWS, &calls).await;
     assert!(
         h.store.flows(None).await.unwrap().is_empty(),
         "nothing imported"
@@ -135,7 +66,7 @@ async fn an_unauthorised_call_is_refused_and_changes_nothing() {
 #[tokio::test]
 async fn a_person_with_import_flows_chooses_imports_and_asks_a_scan() {
     let (h, app, core) = setup().await;
-    *core.0.lock().unwrap() = Some(vec![IMPORT_FLOWS.into()]);
+    core.holds(&[IMPORT_FLOWS]);
 
     let (status, found) = call(&app, Method::GET, FOUND, true, Value::Null).await;
     assert_eq!(status, StatusCode::OK);

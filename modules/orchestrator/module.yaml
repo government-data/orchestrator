@@ -84,11 +84,27 @@ drain:
 removal:
   path: /internal/removal
 
-# Only the action decision 0011 names; the flows, runs, logs, schedules and
-# pauses actions wait for a ruling.
+# The people's actions (decision 0011, step 6): import, see, run, manage
+# flows and engines, manage schedules.
 permissions:
   actions:
     - name: orchestrator:ImportFlows
       description:
         en: Import the flows already on a cluster
         es: Importar los flujos que ya están en un clúster
+    - name: orchestrator:ViewFlows
+      description:
+        en: See flows, folders, runs and their logs
+        es: Ver los flujos, las carpetas, las ejecuciones y sus registros
+    - name: orchestrator:RunWorkflow
+      description:
+        en: Run a flow now and cancel a run
+        es: Ejecutar un flujo ahora y cancelar una ejecución
+    - name: orchestrator:ManageFlows
+      description:
+        en: Edit, pause and resume flows and engines
+        es: Editar, pausar y reanudar flujos y motores
+    - name: orchestrator:ManageSchedules
+      description:
+        en: Create, enable, disable and delete a flow's schedules
+        es: Crear, activar, desactivar y eliminar las programaciones de un flujo
