@@ -17,6 +17,7 @@ mod metrics;
 mod modules;
 mod outbox;
 mod people;
+mod people_http;
 mod port;
 mod removal;
 mod scan;
@@ -46,6 +47,7 @@ pub use people::{
     person_of, CachedActions, EffectiveActions, OidcPeople, People, Person, PersonTokens, Refused,
     IMPORT_FLOWS,
 };
+pub use people_http::{people_router, PeopleState};
 pub use port::{runner_of, EnginePort, Machine, PortError};
 pub use removal::{removal, RemovalAnswer, ORCHESTRATOR_MODULE};
 pub use scan::ScanAsked;
