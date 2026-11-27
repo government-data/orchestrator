@@ -23,6 +23,7 @@ trino-runner.workspace = true
 async-trait.workspace = true
 axum.workspace = true
 logging.workspace = true
+prometheus-client.workspace = true
 reqwest.workspace = true
 rustix.workspace = true
 serde.workspace = true

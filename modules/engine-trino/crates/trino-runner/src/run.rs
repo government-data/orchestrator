@@ -2,12 +2,13 @@
 //! amendment A1's skipped deletes and placeholders).
 
 use std::collections::BTreeMap;
+use std::time::Instant;
 
 use engine_port::LogStream;
 use engine_runner::{Outcome, RunContext};
 use serde_json::Value;
 
-use crate::bundle::{Bundle, PlaceholderType, RunAs, Statement};
+use crate::bundle::{Bundle, Expects, PlaceholderType, RunAs, Statement};
 use crate::check::{class, fits, Answer};
 use crate::engine::{transient, TrinoEngine};
 use crate::ports::{Core, Trino, TrinoUser};
@@ -55,10 +56,12 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                     },
                 },
             };
+            let clock = Instant::now();
             let answer = match self.step(job, st, &known, &token, ctx).await {
                 Ok(a) => a,
                 Err(o) => return failed(trail, st, o),
             };
+            ctx.timed(stage(&st.expects), clock.elapsed());
             let Some(n) = fits(&answer, &st.expects) else {
                 ctx.log(
                     LogStream::System,
@@ -176,6 +179,16 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                     .map_err(|f| f.kind)
             }
         }
+    }
+}
+
+/// A statement's stage in the runner's metrics, by what it answers: a
+/// fixed name, never its id.
+fn stage(expects: &Expects) -> &'static str {
+    match expects {
+        Expects::Count { .. } => "write",
+        Expects::Rows { .. } => "read",
+        Expects::Done => "layout",
     }
 }
 
