@@ -40,6 +40,18 @@ async fn core(answers: Vec<(u16, Value)>) -> (HttpCore, Seen) {
             ),
         )
         .route(
+            "/api/internal/quality/v1/runs/{run}/rows",
+            post(
+                |State((seen, answers)): State<(Seen, Answers)>,
+                 Path(run): Path<String>,
+                 Json(body): Json<Value>| async move {
+                    seen.lock().unwrap().push((run, "rows".into(), body));
+                    let (code, answer) = answers.lock().unwrap().remove(0);
+                    (StatusCode::from_u16(code).unwrap(), Json(answer))
+                },
+            ),
+        )
+        .route(
             "/oauth/token",
             post(|| async { Json(json!({"access_token": "machine", "expires_in": 300})) }),
         )
@@ -123,4 +135,24 @@ async fn already_reported_is_kept_a_refusal_is_final_and_a_down_core_an_error() 
     assert!(c.report(RUN, &r).await.is_err(), "503: sent again");
     assert!(c.report(RUN, &r).await.is_err(), "429: sent again");
     assert!(c.report("../x", &r).await.is_err(), "not a run id");
+}
+
+#[tokio::test]
+async fn rows_go_to_their_route_and_after_the_report_are_refused() {
+    let (c, seen) = core(vec![
+        (204, Value::Null),
+        (409, json!({"error": "already_reported"})),
+    ])
+    .await;
+    let rows = vec![vec![json!("Synthetic"), json!(1)]];
+    assert_eq!(c.rows(RUN, "page", &rows).await.unwrap(), Delivery::Kept);
+    assert_eq!(
+        c.rows(RUN, "page", &rows).await.unwrap(),
+        Delivery::Refused("already_reported".into())
+    );
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen[0].2,
+        json!({"statement": "page", "rows": [["Synthetic", 1]]})
+    );
 }

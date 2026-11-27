@@ -14,7 +14,7 @@ mod steps;
 
 pub use bundle::{
     bundle_kid, digest_hex, Bundle, BundleRefused, Expects, Keys, OnlyIfRows, Placeholder,
-    PlaceholderType, RunAs, SignedBundle, Source, Statement, BUNDLE_TYP,
+    PlaceholderType, RunAs, SignedBundle, Source, Statement, BUNDLE_TYP, MAX_VALUES_ROWS,
 };
 pub use check::{class, fits, Answer, Class};
 pub use engine::{parameters, TrinoEngine, KINDS};

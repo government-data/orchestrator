@@ -15,6 +15,9 @@ use trino_runner::{
     SignedBundle, Trino, TrinoFailure, TrinoUser, BUNDLE_TYP,
 };
 
+/// A values read's rows.
+pub type Rows = Vec<Vec<Value>>;
+
 pub const JOB: &str = "00000000-0000-4000-8000-00000000000a";
 
 pub fn key() -> EcdsaKeyPair {
@@ -90,6 +93,10 @@ pub struct FakeCore {
     pub reports: Arc<Mutex<Vec<(String, RunReport)>>>,
     /// What it answers each report in turn (`Kept` once these run out).
     pub answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
+    /// Each values read's rows sent, with its statement.
+    pub rows: Arc<Mutex<Vec<(String, Rows)>>>,
+    /// What it answers each rows post in turn (`Kept` once these run out).
+    pub row_answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
 }
 
 impl std::fmt::Debug for FakeCore {
@@ -108,6 +115,8 @@ impl FakeCore {
             asked: Arc::default(),
             reports: Arc::default(),
             answers: Arc::default(),
+            rows: Arc::default(),
+            row_answers: Arc::default(),
         }
     }
 }
@@ -135,6 +144,23 @@ impl Core for FakeCore {
     }
     async fn credentials(&self, _: &str) -> Result<Vec<Credential>, CoreError> {
         Ok(self.credentials.clone())
+    }
+    async fn rows(
+        &self,
+        _: &str,
+        statement: &str,
+        rows: &[Vec<Value>],
+    ) -> Result<Delivery, CoreError> {
+        self.rows
+            .lock()
+            .unwrap()
+            .push((statement.into(), rows.to_vec()));
+        let mut answers = self.row_answers.lock().unwrap();
+        if answers.is_empty() {
+            Ok(Delivery::Kept)
+        } else {
+            answers.remove(0)
+        }
     }
     async fn report(&self, run: &str, report: &RunReport) -> Result<Delivery, CoreError> {
         self.reports

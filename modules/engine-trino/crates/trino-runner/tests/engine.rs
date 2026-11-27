@@ -258,6 +258,9 @@ fn each_kind_compiled_for_trino_has_its_job_user() {
         "extract",
         "tables",
         "map",
+        "records",
+        "test_rule",
+        "derive",
     ]
     .iter()
     .map(|k| TrinoUser::of_kind(k).map(TrinoUser::as_str))
@@ -274,6 +277,9 @@ fn each_kind_compiled_for_trino_has_its_job_user() {
             Some("maint"),
             Some("extract"),
             Some("source"),
+            Some("source"),
+            Some("source"),
+            Some("sample"),
             None
         ]
     );
@@ -316,9 +322,9 @@ async fn a_tables_listing_asks_the_core_for_its_source() {
 #[tokio::test]
 async fn a_kind_without_a_trino_user_runs_nothing() {
     let mut payload = bundle(json!([write("a", "INSERT a")]));
-    payload["kind"] = json!("map");
+    payload["kind"] = json!("derive");
     let (runner, fake, trino) = setup(&payload, vec![]);
-    let run = fake.queue_run("map", params());
+    let run = fake.queue_run("derive", params());
     drive(&runner).await;
     let r = fake.run(&run).unwrap();
     assert_eq!(r.error_class.as_deref(), Some("kind_not_on_trino"));

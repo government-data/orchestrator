@@ -11,6 +11,7 @@
 //! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, source?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` |
 //! | `POST /internal/quality/v1/runs/{run}/trino-token` `{"user": "rules" \| "report" \| "maint" \| "extract" \| "source"}` | `{"access_token": <JWT>, "expires_in"}` |
 //! | `POST /internal/quality/v1/runs/{run}/source-secrets` | `{"current": {<name>: <value>}, "previous": {…} \| null}` |
+//! | `POST /internal/quality/v1/runs/{run}/rows` `{statement, rows}` | `204`; a values read's rows, before the report |
 //! | `POST /internal/quality/v1/runs/{run}/report` `{digest, state, statements, snapshots, error_class?}` | `204`; `409 already_reported` when kept before |
 //! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
@@ -161,14 +162,20 @@ impl HttpCore {
         res.json().await.map_err(|e| failed(path, e))
     }
 
-    /// Posts a run's report: kept (now or before), refused for good (a
-    /// 4xx but 408 and 429, by the core's error name), or not answered.
-    async fn post_report(&self, path: &str, report: &RunReport) -> Result<Delivery, CoreError> {
+    /// Posts a run's report or rows: kept, refused for good (a 4xx but
+    /// 408 and 429, by the core's error name; `already_reported` is kept
+    /// for a report), or not answered.
+    async fn post_kept(
+        &self,
+        path: &str,
+        body: &impl serde::Serialize,
+        report: bool,
+    ) -> Result<Delivery, CoreError> {
         let res = self
             .http
             .post(format!("{}{path}", self.base))
             .bearer_auth(self.machine_token(JOBS_AUDIENCE).await?)
-            .json(report)
+            .json(body)
             .send()
             .await
             .map_err(|e| failed(path, e))?;
@@ -188,7 +195,7 @@ impl HttpCore {
             // A name only: nothing else of the core's answer reaches a log.
             .filter(|e| e.len() <= 64 && e.bytes().all(|b| b.is_ascii_lowercase() || b == b'_'))
             .unwrap_or_else(|| format!("http_{}", status.as_u16()));
-        Ok(if error == "already_reported" {
+        Ok(if report && error == "already_reported" {
             Delivery::Kept
         } else {
             Delivery::Refused(error)
@@ -269,7 +276,18 @@ impl Core for HttpCore {
     }
 
     async fn report(&self, job: &str, report: &RunReport) -> Result<Delivery, CoreError> {
-        self.post_report(&run_path(job, "report")?, report).await
+        self.post_kept(&run_path(job, "report")?, report, true)
+            .await
+    }
+
+    async fn rows(
+        &self,
+        job: &str,
+        statement: &str,
+        rows: &[Vec<Value>],
+    ) -> Result<Delivery, CoreError> {
+        let body = json!({"statement": statement, "rows": rows});
+        self.post_kept(&run_path(job, "rows")?, &body, false).await
     }
 
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError> {
