@@ -10,6 +10,7 @@ mod events;
 mod found;
 mod http;
 mod identity;
+mod import;
 mod inventory;
 mod machines;
 mod metrics;
@@ -34,6 +35,9 @@ pub use events::{
 };
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
 pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
+pub use import::{
+    ImportAnswer, ImportError, ImportItem, ImportedItem, Skipped, SkippedItem, MAX_IMPORT,
+};
 pub use machines::MachineList;
 pub use metrics::{Metrics, RunResult};
 pub use modules::{installed_lines, ModuleList};
