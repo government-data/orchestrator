@@ -9,7 +9,8 @@
 //! | `POST /api/v1/imports`     | import chosen artefacts (at most 500)          |
 //! | `POST /api/v1/scans`       | ask a runner to report what it finds now       |
 //!
-//! Flows, folders, runs and logs are read in [`crate::people_views`].
+//! Flows and folders are read in [`crate::people_views`], runs and their
+//! logs in [`crate::people_runs`].
 
 use std::sync::Arc;
 
@@ -47,7 +48,8 @@ pub fn people_router<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
         .route("/api/v1/imports", post(import::<C>))
         .route("/api/v1/scans", post(scan::<C>))
         .with_state(Arc::clone(&state))
-        .merge(crate::people_views::routes(state))
+        .merge(crate::people_views::routes(Arc::clone(&state)))
+        .merge(crate::people_runs::routes(state))
 }
 
 pub(crate) fn error(status: StatusCode, why: &str) -> Response {

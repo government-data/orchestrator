@@ -21,6 +21,7 @@ mod modules;
 mod outbox;
 mod people;
 mod people_http;
+mod people_runs;
 mod people_views;
 mod port;
 mod removal;
