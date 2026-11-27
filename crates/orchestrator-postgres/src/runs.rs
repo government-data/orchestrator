@@ -95,8 +95,9 @@ impl PgStore {
         Ok(id)
     }
 
-    /// Hands out the oldest queued run this runner may take, under a new
-    /// lease: of its engine and line, due, for any cluster or its own,
+    /// Hands out the oldest queued run this runner may take (in a slot
+    /// pool with turns, the one whose value was served least recently),
+    /// under a new lease: of its engine and line, due, for any cluster or its own,
     /// with the engine neither paused nor held, the flow not running when
     /// it does not allow overlap, its lock free and its pool not full. Claims are serialised by an advisory
     /// lock, so two never pass the same lock or pool at once.
@@ -260,10 +261,12 @@ impl PgStore {
 }
 
 const CLAIM: &str = "
-WITH pick AS (
-    SELECT r.id
+WITH candidate AS (
+    SELECT r.id, r.queued_at, COALESCE(r.slot_pool, kp.pool) AS pool,
+           r.parameters ->> kp.fair_by AS fair, kp.fair_by
       FROM runs r
       JOIN flows f ON f.id = r.flow_id
+      LEFT JOIN kind_pools kp ON kp.engine = r.engine AND kp.line = r.line AND kp.kind = r.kind
      WHERE r.state = 'queued' AND r.engine = $1 AND r.line = $2 AND r.not_before <= $7
        AND (r.cluster IS NULL OR r.cluster = $4)
        AND NOT EXISTS (SELECT 1 FROM engine_pauses p WHERE p.engine = r.engine)
@@ -275,17 +278,30 @@ WITH pick AS (
             AND NOT EXISTS (
             SELECT 1 FROM run_locks l JOIN runs o ON o.id = l.run_id
              WHERE l.name = r.lock_name AND o.state = 'running')))
-       AND (r.slot_pool IS NULL OR (
-            SELECT count(*) FROM runs o WHERE o.slot_pool = r.slot_pool AND o.state = 'running')
-            < COALESCE((SELECT s.size FROM slot_pools s WHERE s.name = r.slot_pool), 1))
-     ORDER BY r.queued_at, r.id
+),
+pick AS (
+    SELECT c.id, c.pool
+      FROM candidate c
+     WHERE c.pool IS NULL OR (
+            SELECT count(*) FROM runs o WHERE o.slot_pool = c.pool AND o.state = 'running')
+            < COALESCE((SELECT s.size FROM slot_pools s WHERE s.name = c.pool), 1)
+     -- In a pool with turns, the value served least recently goes first.
+     ORDER BY CASE WHEN c.fair_by IS NULL THEN '-infinity'::timestamptz ELSE COALESCE((
+              SELECT max(o.started_at) FROM runs o
+               WHERE o.slot_pool = c.pool AND o.parameters ->> c.fair_by = c.fair),
+              '-infinity'::timestamptz) END,
+              c.queued_at, c.id
      LIMIT 1
+),
+locked AS (
+    SELECT r.id, pick.pool FROM runs r JOIN pick ON pick.id = r.id
        FOR UPDATE OF r SKIP LOCKED
 )
 UPDATE runs r
-   SET state = 'running', started_at = $7, runner = $3, lease = $5, lease_until = $6
-  FROM pick
- WHERE r.id = pick.id
+   SET state = 'running', started_at = $7, runner = $3, lease = $5, lease_until = $6,
+       slot_pool = locked.pool
+  FROM locked
+ WHERE r.id = locked.id
 RETURNING r.id::text, r.flow_id::text, r.kind, r.parameters, r.attempt, r.timeout_secs,
           CASE WHEN r.resume THEN r.retry_of::text END AS previous_run,
           (SELECT p.engine_ref FROM runs p WHERE r.resume AND p.id = r.retry_of) AS previous_ref,

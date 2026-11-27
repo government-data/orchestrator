@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use chrono::Duration;
 use engine_port::{
-    Claim, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Lock, LockAnswer, Logs,
+    Claim, Claimed, Descriptor, Finish, Hold, HoldAnswer, HoldState, Lock, LockAnswer, Logs, Pools,
     Refused, Registered, Release, Renew, RenewAction, Renewed, LEASE_SECS,
 };
 use orchestration_model::{open_windows, EngineLine, EngineName};
@@ -284,6 +284,25 @@ impl<C: Clock> EnginePort<C> {
             }
         }
         Ok(())
+    }
+
+    /// Replaces an engine and line's slot pools (core decision 0090, point
+    /// 6.3): each kind must be one its registered descriptor declares.
+    pub async fn set_pools(&self, engine: &EngineLine, p: &Pools) -> Result<(), PortError> {
+        p.validate()?;
+        let registered = self.store.engines().await?;
+        let Some(e) = registered.iter().find(|e| &e.engine == engine) else {
+            return Err(PortError::UnknownEngine);
+        };
+        if let Some(k) = p
+            .pools
+            .iter()
+            .flat_map(|p| &p.kinds)
+            .find(|k| !e.kinds.iter().any(|d| &d.name == *k))
+        {
+            return Err(Refused::Invalid(format!("kind {k:?} is not the engine's")).into());
+        }
+        Ok(self.store.set_pools(engine, &p.pools).await?)
     }
 
     /// Takes a lock for a running run (core decision 0090, point 6.2.4):

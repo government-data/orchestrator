@@ -13,7 +13,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use engine_port::{
-    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Lock, Logs, Release, Renew,
+    Claim, DeployFinish, Descriptor, Finish, Found, Hold, Inventory, Lock, Logs, Pools, Release,
+    Renew,
 };
 use orchestration_model::{EngineLine, EngineName, Line};
 use serde_json::json;
@@ -137,6 +138,7 @@ pub fn router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
             "/internal/engines/{engine}/{line}/inventory",
             put(inventory::<C>),
         )
+        .route("/internal/engines/{engine}/{line}/pools", put(pools::<C>))
         .route("/internal/engines/{engine}/hold", post(hold::<C>))
         .route("/internal/engines/{engine}/release", post(release::<C>))
         .route("/internal/removal", get(removal::<C>))
@@ -158,6 +160,16 @@ async fn register<C: Clock>(
     let e = engine_line(&engine, &line)?;
     let answer = s.port.register(&m, module.as_deref(), &e, &d).await?;
     Ok(Json(answer).into_response())
+}
+
+async fn pools<C: Clock>(
+    State(s): Shared<C>,
+    Caller(..): Caller,
+    Path((engine, line)): Path<(String, String)>,
+    Json(p): Json<Pools>,
+) -> Result<StatusCode, ApiError> {
+    s.port.set_pools(&engine_line(&engine, &line)?, &p).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn claim<C: Clock>(
