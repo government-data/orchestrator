@@ -17,6 +17,27 @@
           "maxQueued": 4
         },
         {
+          "name": "extract",
+          "schedulingWeight": 2,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @JOBS_CONCURRENCY@,
+          "maxQueued": 20
+        },
+        {
+          "name": "source",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @JOBS_CONCURRENCY@,
+          "maxQueued": 20
+        },
+        {
+          "name": "sample",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @JOBS_CONCURRENCY@,
+          "maxQueued": 20
+        },
+        {
           "name": "maintenance",
           "schedulingWeight": 1,
           "softMemoryLimit": "100%",
@@ -64,6 +85,9 @@
     { "user": "job_rules_[a-z0-9_]+", "queryType": "SELECT", "group": "global.reject" },
     { "user": "job_rules_[a-z0-9_]+", "queryType": "EXPLAIN", "group": "global.reject" },
     { "user": "job_rules_[a-z0-9_]+", "queryType": "DESCRIBE", "group": "global.reject" },
+    { "user": "job_extract_[a-z0-9_]+", "group": "global.extract" },
+    { "user": "job_source_[a-z0-9_]+", "group": "global.source" },
+    { "user": "job_sample_[a-z0-9_]+", "group": "global.sample" },
     { "user": "job_[a-z0-9_]+", "group": "global.rules" },
     { "user": "person-[0-9a-f-]{36}|bi-superset", "group": "global.bi.${USER}" },
     { "user": "qd-admin", "group": "global.admin" },

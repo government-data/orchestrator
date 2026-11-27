@@ -10,6 +10,29 @@
     }
   },
   {
+    "group": "global\\.extract",
+    "sessionProperties": {
+      "query_max_memory": "@EXTRACT_MEMORY@",
+      "query_max_total_memory": "@EXTRACT_MEMORY@",
+      "query_max_memory_per_node": "@EXTRACT_MEMORY@",
+      "spill_enabled": "true",
+      "query_max_execution_time": "2h",
+      "query_max_run_time": "3h",
+      "query_max_write_physical_size": "50GB"
+    }
+  },
+  {
+    "group": "global\\.(source|sample)",
+    "sessionProperties": {
+      "query_max_memory": "@READ_MEMORY@",
+      "query_max_total_memory": "@READ_MEMORY@",
+      "query_max_memory_per_node": "@READ_MEMORY@",
+      "query_max_execution_time": "5m",
+      "query_max_run_time": "10m",
+      "spill_enabled": "false"
+    }
+  },
+  {
     "group": "global\\.maintenance",
     "sessionProperties": {
       "spill_enabled": "true",
