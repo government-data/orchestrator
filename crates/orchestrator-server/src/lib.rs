@@ -5,6 +5,7 @@
 mod clock;
 mod core_api;
 mod core_calls;
+mod core_chains;
 mod core_schedules;
 mod deploys;
 mod events;
@@ -33,13 +34,16 @@ pub use core_api::{
     CoreToken, HttpEffectiveActions, HttpMachineList, HttpModuleList, MachineClient, CORE_AUDIENCE,
 };
 pub use core_calls::{core_router, DrainAnswer};
+pub use core_chains::{chains_router, ChainAsked, ChainStarted, CORE_JOB_ORIGIN};
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
 pub use events::{
     iam_changes_once, watch_iam_changes, CoreEvents, Event, HttpEvents, Published, Received,
     IAM_CHANGED,
 };
 pub use http::{counted, router, ApiError, Authenticate, Caller, PortState};
-pub use identity::{named_machine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO};
+pub use identity::{
+    named_machine, CoreMachine, NamedMachine, TraefikMachine, CLIENT_CERT_INFO, CORE_ROLE,
+};
 pub use import::{
     ImportAnswer, ImportError, ImportItem, ImportedItem, Skipped, SkippedItem, MAX_IMPORT,
 };

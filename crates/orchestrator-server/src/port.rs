@@ -89,6 +89,8 @@ pub struct EnginePort<C> {
     metrics: Option<Arc<Metrics>>,
     sealer: Option<Arc<Sealer>>,
     pub(crate) machines: Option<Arc<dyn MachineList>>,
+    /// The flow the core's chains run on.
+    pub(crate) core_flow: Option<String>,
 }
 
 impl<C> fmt::Debug for EnginePort<C> {
@@ -105,6 +107,7 @@ impl<C: Clock> EnginePort<C> {
             metrics: None,
             sealer: None,
             machines: None,
+            core_flow: None,
         }
     }
 
@@ -113,6 +116,14 @@ impl<C: Clock> EnginePort<C> {
     #[must_use]
     pub fn with_machines(mut self, machines: Arc<dyn MachineList>) -> Self {
         self.machines = Some(machines);
+        self
+    }
+
+    /// Starts the chains the core asks for on the flow `flow_id` (core
+    /// decision 0090, point 2); without it, none is started.
+    #[must_use]
+    pub fn with_core_flow(mut self, flow_id: String) -> Self {
+        self.core_flow = Some(flow_id);
         self
     }
 

@@ -31,6 +31,23 @@ impl Authenticate for TraefikMachine {
     }
 }
 
+/// The role (`OU`) of the core's own machine, the application machine
+/// whose certificate the core calls modules with.
+pub const CORE_ROLE: &str = "app";
+
+/// Reads the calling machine from Traefik's header, only when it is the
+/// core's ([`CORE_ROLE`]): what only the core may ask, as starting a chain.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CoreMachine;
+
+#[async_trait]
+impl Authenticate for CoreMachine {
+    async fn machine(&self, headers: &HeaderMap) -> Option<Machine> {
+        let m = named_machine(headers)?;
+        (m.role.as_deref() == Some(CORE_ROLE)).then_some(Machine(m.name))
+    }
+}
+
 /// A machine certificate's subject, as Traefik passes it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NamedMachine {
@@ -129,5 +146,19 @@ mod tests {
         assert_eq!(TraefikMachine.machine(&HeaderMap::new()).await, None);
         let m = TraefikMachine.machine(&headers(&[SEEN])).await;
         assert_eq!(m, Some(Machine("cluster-1".into())));
+    }
+
+    #[tokio::test]
+    async fn only_the_cores_machine_is_the_core() {
+        assert_eq!(
+            CoreMachine.machine(&headers(&[SEEN])).await,
+            None,
+            "a worker"
+        );
+        let app = "Subject%3D%22O%3Dqd%2COU%3Dapp%2CCN%3Dmaster%22%3BSerialNumber%3D%221%22";
+        let m = CoreMachine.machine(&headers(&[app])).await;
+        assert_eq!(m, Some(Machine("master".into())));
+        let no_role = "Subject%3D%22O%3Dqd%2CCN%3Dmaster%22%3BSerialNumber%3D%221%22";
+        assert_eq!(CoreMachine.machine(&headers(&[no_role])).await, None);
     }
 }
