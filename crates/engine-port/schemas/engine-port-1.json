@@ -1076,6 +1076,40 @@
       "title": "InventoryAnswer",
       "type": "object"
     },
+    "Lock": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "A run asks for a lock, or gives it back.",
+      "properties": {
+        "lease": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "lease",
+        "name"
+      ],
+      "title": "Lock",
+      "type": "object"
+    },
+    "LockAnswer": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "description": "Whether the run holds the lock now. Not granted: another running run\nholds it; ask again later, the run's lease renewed meanwhile.",
+      "properties": {
+        "granted": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "granted"
+      ],
+      "title": "LockAnswer",
+      "type": "object"
+    },
     "Logs": {
       "$defs": {
         "LogLine": {

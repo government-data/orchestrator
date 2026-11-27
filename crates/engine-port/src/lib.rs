@@ -10,6 +10,8 @@
 //! | `POST /internal/runs/{id}/renew` | [`Renew`] | [`Renewed`] |
 //! | `POST /internal/runs/{id}/logs` | [`Logs`] | 204 |
 //! | `POST /internal/runs/{id}/finish` | [`Finish`] | 204 |
+//! | `POST /internal/runs/{id}/locks` | [`Lock`] | [`LockAnswer`] |
+//! | `POST /internal/runs/{id}/locks/release` | [`Lock`] | 204 |
 //! | `POST /internal/engines/{engine}/hold` | [`Hold`] | [`HoldAnswer`] |
 //! | `POST /internal/engines/{engine}/release` | [`Release`] | 204 |
 //! | `PUT /internal/engines/{engine}/{line}/found` | [`Found`] | [`FoundAnswer`] |
@@ -21,6 +23,7 @@ mod deploys;
 mod descriptor;
 mod found;
 mod inventory;
+mod locks;
 mod runs;
 mod schema;
 
@@ -37,6 +40,7 @@ pub use inventory::{
     ArtefactRecord, FolderRecord, Inventory, InventoryAnswer, InventoryItem, SkipReason, Skipped,
     RECORD_FILE, RECORD_FORMAT,
 };
+pub use locks::{is_lock_name, Lock, LockAnswer, MAX_LOCK_NAME_BYTES};
 pub use runs::{
     Claim, Claimed, Finish, Hold, HoldAnswer, HoldState, LogLine, LogStream, Logs, Progress,
     Release, Renew, RenewAction, Renewed, Resume, MAX_COUNTS, MAX_LOG_LINES, MAX_LOG_LINE_BYTES,
