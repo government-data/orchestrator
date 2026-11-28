@@ -107,6 +107,46 @@ impl PgStore {
         rows.iter().map(schedule).collect()
     }
 
+    /// One schedule, if it exists.
+    pub async fn schedule(&self, id: &str) -> Result<Option<Schedule>, StoreError> {
+        let sql = format!("SELECT {SCHEDULE_COLUMNS} FROM schedules WHERE id = $1::uuid");
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(schedule).transpose()
+    }
+
+    /// Enables a schedule a person keeps, firing next at `next`, or
+    /// disables it with `None`; `None` back if there is no such schedule
+    /// or the core keeps it.
+    pub async fn set_schedule_next(
+        &self,
+        id: &str,
+        next: Option<DateTime<Utc>>,
+    ) -> Result<Option<Schedule>, StoreError> {
+        let sql = format!(
+            "UPDATE schedules SET enabled = $2 IS NOT NULL, next_fire_at = $2
+              WHERE id = $1::uuid AND core_id IS NULL RETURNING {SCHEDULE_COLUMNS}"
+        );
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .bind(next)
+            .fetch_optional(&self.pool)
+            .await?;
+        row.as_ref().map(schedule).transpose()
+    }
+
+    /// Deletes a schedule a person keeps (its runs stay); false if there is
+    /// no such schedule or the core keeps it.
+    pub async fn delete_schedule(&self, id: &str) -> Result<bool, StoreError> {
+        let done = sqlx::query("DELETE FROM schedules WHERE id = $1::uuid AND core_id IS NULL")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() == 1)
+    }
+
     /// The enabled schedules due at `now`, the earliest first.
     pub async fn due_schedules(&self, now: DateTime<Utc>) -> Result<Vec<Schedule>, StoreError> {
         let sql = format!(

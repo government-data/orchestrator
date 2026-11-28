@@ -12,7 +12,7 @@
 //! Flows and folders are read in [`crate::people_views`], runs and their
 //! logs in [`crate::people_runs`]; a flow is run and a run cancelled in
 //! [`crate::people_run`]; flows and engines are edited, paused and resumed
-//! in [`crate::people_flows`].
+//! in [`crate::people_flows`]; schedules in [`crate::people_schedules`].
 
 use std::sync::Arc;
 
@@ -53,7 +53,8 @@ pub fn people_router<C: Clock + Clone>(state: Arc<PeopleState<C>>) -> Router {
         .merge(crate::people_views::routes(Arc::clone(&state)))
         .merge(crate::people_runs::routes(Arc::clone(&state)))
         .merge(crate::people_run::routes(Arc::clone(&state)))
-        .merge(crate::people_flows::routes(state))
+        .merge(crate::people_flows::routes(Arc::clone(&state)))
+        .merge(crate::people_schedules::routes(state))
 }
 
 pub(crate) fn error(status: StatusCode, why: &str) -> Response {
