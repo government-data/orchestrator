@@ -6,6 +6,7 @@ mod clock;
 mod core_api;
 mod core_calls;
 mod core_chains;
+mod core_flow;
 mod core_schedules;
 mod core_schedules_http;
 mod core_token;
@@ -41,6 +42,7 @@ pub use core_api::{
 };
 pub use core_calls::{core_router, DrainAnswer};
 pub use core_chains::{chains_router, ChainAsked, ChainStarted, CORE_JOB_ORIGIN};
+pub use core_flow::CoreFlowAsked;
 pub use core_schedules::{is_core_id, CoreFire, CoreSchedule, CoreSchedules};
 pub use core_schedules_http::HttpCoreSchedules;
 pub use core_token::{CoreCaller, CORE_CLIENT};

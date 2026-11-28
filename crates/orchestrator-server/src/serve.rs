@@ -89,7 +89,7 @@ pub async fn serve(
     let events: Arc<dyn CoreEvents> =
         Arc::new(HttpEvents::new(http.clone(), base, Arc::clone(&token)));
     let people = people(&http, &settings, actions.clone());
-    let mut port = EnginePort::new(store.clone(), SystemClock)
+    let port = EnginePort::new(store.clone(), SystemClock)
         .with_machines(Arc::new(HttpMachineList::new(
             http.clone(),
             base,
@@ -97,20 +97,13 @@ pub async fn serve(
         )))
         .with_sealer(Arc::new(settings.sealer))
         .with_metrics(Arc::clone(&metrics));
-    let mut scheduler = Scheduler::new(store.clone(), SystemClock)
-        .with_modules(Arc::new(HttpModuleList::new(
-            http.clone(),
-            base,
-            Arc::clone(&token),
-        )))
+    let modules = HttpModuleList::new(http.clone(), base, Arc::clone(&token));
+    let schedules = HttpCoreSchedules::new(http.clone(), base, token);
+    let scheduler = Scheduler::new(store.clone(), SystemClock)
+        .with_modules(Arc::new(modules))
+        .with_core_schedules(Arc::new(schedules))
         .with_metrics(Arc::clone(&metrics));
-    if let Some(flow) = settings.core_flow {
-        let schedules = HttpCoreSchedules::new(http.clone(), base, token);
-        scheduler = scheduler.with_core_schedules(Arc::new(schedules), flow.clone());
-        port = port.with_core_flow(flow);
-    } else {
-        tracing::warn!("no ORCHESTRATOR_CORE_FLOW: the core's schedules and chains wait");
-    }
+    core_flow_at_start(&store, settings.core_flow.as_deref()).await?;
     let engines = InternalCaller::new(
         JwksKeys::new(http.clone(), &settings.issuer),
         expected(&settings.issuer, ORCHESTRATOR_MODULE),
@@ -138,6 +131,26 @@ pub async fn serve(
     loops.shutdown().await;
     tracing::info!("the orchestrator stopped");
     served
+}
+
+/// Writes `ORCHESTRATOR_CORE_FLOW`, when set, as the core's flow (ruling
+/// 97: the core makes its flow through `/internal/core-flow`; the setting
+/// stays for installations that set it by hand).
+async fn core_flow_at_start(store: &PgStore, flow: Option<&str>) -> Result<(), String> {
+    if let Some(flow) = flow {
+        store
+            .set_core_flow(flow)
+            .await
+            .map_err(|e| format!("ORCHESTRATOR_CORE_FLOW: {e}"))?;
+    } else if store
+        .core_flow()
+        .await
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        tracing::warn!("no flow for the core's chains yet: its schedules and chains wait");
+    }
+    Ok(())
 }
 
 /// The metrics, written to the metrics file when there is one.

@@ -9,8 +9,9 @@
 //! | --- | --- |
 //! | `POST /internal/chains` `{"job_id", "steps": [{"kind", "parameters", "setup"?: {"key", "fingerprint"}}]}` | `201 {"chain_id"}` started; `200 {"chain_id"}` that job's chain, started before |
 //!
-//! A call from any other machine, or without the core's token, is `401`; malformed steps are `422`; with
-//! no flow set for the core's chains, `503`.
+//! A call from any other machine, or without the core's token, is `401`;
+//! malformed steps are `422`; with no flow for the core's chains yet (the
+//! core makes it at `/internal/core-flow`), `503`.
 
 use std::sync::Arc;
 
@@ -63,7 +64,7 @@ impl<C: Clock> EnginePort<C> {
         machine: &Machine,
         asked: ChainAsked,
     ) -> Result<Option<ChainStarted>, PortError> {
-        let Some(flow_id) = &self.core_flow else {
+        let Some(flow_id) = self.store.core_flow().await? else {
             return Ok(None);
         };
         let invalid = |why: String| PortError::Refused(Refused::Invalid(why));
@@ -73,7 +74,7 @@ impl<C: Clock> EnginePort<C> {
         validate_steps(&asked.steps).map_err(invalid)?;
         let origin = format!("{CORE_JOB_ORIGIN}{}", asked.job_id);
         let chain = NewChain {
-            flow_id: flow_id.clone(),
+            flow_id,
             origin: origin.clone(),
             trigger: Trigger::Manual(machine.0.clone()),
             steps: asked.steps,
@@ -94,11 +95,16 @@ impl<C: Clock> EnginePort<C> {
     }
 }
 
-/// The core's chain requests; `state.auth` admits the core's machine with
+/// The core's chain requests and its flow ([`crate::core_flow`]);
+/// `state.auth` admits the core's machine with
 /// its own token alone ([`crate::CoreCaller`]).
 pub fn chains_router<C: Clock + Clone>(state: Arc<PortState<C>>) -> Router {
     Router::new()
         .route("/internal/chains", post(start::<C>))
+        .route(
+            "/internal/core-flow",
+            post(crate::core_flow::make::<C>).get(crate::core_flow::read::<C>),
+        )
         .with_state(state)
 }
 

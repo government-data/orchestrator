@@ -45,8 +45,8 @@ pub struct Scheduler<C> {
     metrics: Option<Arc<Metrics>>,
     modules: Option<Arc<dyn ModuleList>>,
     last_listed: Arc<Mutex<Option<HashSet<String>>>>,
-    /// The core's schedules, and the flow their chains run on.
-    core: Option<(Arc<dyn CoreSchedules>, String)>,
+    /// The core's schedules; their chains run on the core's flow.
+    core: Option<Arc<dyn CoreSchedules>>,
 }
 
 impl<C: Clock> Scheduler<C> {
@@ -83,10 +83,11 @@ impl<C: Clock> Scheduler<C> {
     }
 
     /// Keeps and fires the core's schedules (core decision 0090, point 2),
-    /// their chains on the flow `flow_id`.
+    /// their chains on the core's flow (ruling 97: the one the store keeps;
+    /// none yet, nothing is kept).
     #[must_use]
-    pub fn with_core_schedules(mut self, core: Arc<dyn CoreSchedules>, flow_id: String) -> Self {
-        self.core = Some((core, flow_id));
+    pub fn with_core_schedules(mut self, core: Arc<dyn CoreSchedules>) -> Self {
+        self.core = Some(core);
         self
     }
 
@@ -199,7 +200,10 @@ impl<C: Clock> Scheduler<C> {
     /// ones created, changed ones replaced, those it no longer lists
     /// disabled. Nothing changes while the core does not answer.
     async fn keep_core_schedules(&self, now: DateTime<Utc>) -> Result<(), StoreError> {
-        let Some((core, flow)) = &self.core else {
+        let Some(core) = &self.core else {
+            return Ok(());
+        };
+        let Some(flow) = self.store.core_flow().await? else {
             return Ok(());
         };
         let Some(listed) = core.schedules().await else {
@@ -214,7 +218,7 @@ impl<C: Clock> Scheduler<C> {
                 None
             };
             self.store
-                .keep_core_schedule(flow, &c.id, &c.spec, next)
+                .keep_core_schedule(&flow, &c.id, &c.spec, next)
                 .await?;
             kept.push(c.id.as_str());
         }
@@ -232,7 +236,7 @@ impl<C: Clock> Scheduler<C> {
         fire: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<Option<bool>, StoreError> {
-        let Some((core, flow)) = &self.core else {
+        let Some(core) = &self.core else {
             return Ok(None);
         };
         let Some(answer) = core.fire(core_id, fire).await else {
@@ -247,7 +251,7 @@ impl<C: Clock> Scheduler<C> {
             return Ok(Some(false));
         }
         let chain = NewChain {
-            flow_id: flow.clone(),
+            flow_id: s.flow_id.clone(),
             origin: format!("core:{core_id}:{}", fire.timestamp()),
             trigger: Trigger::Schedule(s.id.clone()),
             steps: answer.steps,

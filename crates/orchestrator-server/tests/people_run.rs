@@ -126,7 +126,8 @@ async fn the_cores_flow_is_not_run_by_a_person() {
     let h = harness().await;
     h.register().await;
     let flow = h.flow("core").await;
-    let port = EnginePort::new(h.store.clone(), h.clock.clone()).with_core_flow(flow.id.clone());
+    h.store.set_core_flow(&flow.id).await.unwrap();
+    let port = EnginePort::new(h.store.clone(), h.clock.clone());
     let (app, core) = people_app_on(port);
     core.holds(&[RUN_WORKFLOW]);
     let uri = format!("/api/v1/flows/{}/runs", flow.id);

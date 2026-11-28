@@ -5,6 +5,7 @@
 
 mod adoption;
 mod chains;
+mod core_flow;
 mod deploys;
 mod drain;
 mod engines;
@@ -26,6 +27,7 @@ mod windows;
 
 pub use adoption::Adoption;
 pub use chains::{ChainsMoved, NewChain};
+pub use core_flow::{NewCoreFlow, CORE_FLOW_NAME, CORE_FOLDER};
 pub use deploys::{Deploy, DeployEnd, NewDeploy};
 pub use drain::DrainCounts;
 pub use engines::{LiveRunners, RegisteredEngine};

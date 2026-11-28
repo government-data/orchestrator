@@ -10,7 +10,7 @@
 //! | the machine's certificate | `QD_MACHINE_DIR` (`/run/qd-node`): `ca.crt`, `machine.pem` |
 //! | the sealing key | `QD_SEALING_KEY_FILE` (`/run/secrets/sealing-key`) |
 //! | where it listens | `ORCHESTRATOR_LISTEN` (`0.0.0.0:8080`) |
-//! | the flow the core's chains run on | `ORCHESTRATOR_CORE_FLOW` (a flow's id; unset: the core's schedules are not kept and its chains not started) |
+//! | the flow the core's chains run on | `ORCHESTRATOR_CORE_FLOW` (a flow's id, written as the core's flow at start; unset: the one the core made at `/internal/core-flow`, if any) |
 //!
 //! No secret is kept in a `Debug` or an error.
 
