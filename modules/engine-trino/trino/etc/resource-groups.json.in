@@ -38,6 +38,20 @@
           "maxQueued": 20
         },
         {
+          "name": "console",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @JOBS_CONCURRENCY@,
+          "maxQueued": 20
+        },
+        {
+          "name": "lookup",
+          "schedulingWeight": 1,
+          "softMemoryLimit": "100%",
+          "hardConcurrencyLimit": @JOBS_CONCURRENCY@,
+          "maxQueued": 10
+        },
+        {
           "name": "maintenance",
           "schedulingWeight": 1,
           "softMemoryLimit": "100%",
@@ -88,6 +102,8 @@
     { "user": "job_extract_[a-z0-9_]+", "group": "global.extract" },
     { "user": "job_source_[a-z0-9_]+", "group": "global.source" },
     { "user": "job_sample_[a-z0-9_]+", "group": "global.sample" },
+    { "user": "job_console_r[0-9a-f]{32}", "group": "global.console" },
+    { "user": "job_lookup_r[0-9a-f]{32}", "group": "global.lookup" },
     { "user": "job_[a-z0-9_]+", "group": "global.rules" },
     { "user": "person-[0-9a-f-]{36}|bi-superset", "group": "global.bi.${USER}" },
     { "user": "qd-admin", "group": "global.admin" },

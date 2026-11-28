@@ -260,6 +260,8 @@ fn each_kind_compiled_for_trino_has_its_job_user() {
         "map",
         "records",
         "test_rule",
+        "query",
+        "entity_key",
         "derive",
     ]
     .iter()
@@ -280,6 +282,8 @@ fn each_kind_compiled_for_trino_has_its_job_user() {
             Some("source"),
             Some("source"),
             Some("sample"),
+            Some("console"),
+            Some("lookup"),
             None
         ]
     );
