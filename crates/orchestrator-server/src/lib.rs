@@ -25,6 +25,7 @@ mod people_flows;
 mod people_http;
 mod people_run;
 mod people_runs;
+mod people_schedules;
 mod people_views;
 mod port;
 mod removal;
