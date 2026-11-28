@@ -19,7 +19,7 @@ pub use bundle::{
     bundle_kid, digest_hex, Bundle, BundleRefused, Expects, Keys, OnlyIfRows, Placeholder,
     PlaceholderType, RunAs, SignedBundle, Source, Statement, BUNDLE_TYP, MAX_VALUES_ROWS,
 };
-pub use check::{class, fits, Answer, Class};
+pub use check::{as_text, class, fits, Answer, Class, MAX_TEXT_COLUMNS};
 pub use engine::{parameters, TrinoEngine, KINDS};
 pub use pools::{pools, rules_concurrency, rules_kinds, FAIR_BY, RULES_POOL};
 pub use ports::{

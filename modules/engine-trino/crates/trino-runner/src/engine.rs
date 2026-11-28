@@ -22,8 +22,9 @@ use crate::report::Trail;
 use crate::steps::Known;
 
 /// The job kinds of core decision 0090 (point 2), with `prepare` (ruling
-/// 66), `rule_test` (ruling 54) and `backfill` (ruling 77).
-pub const KINDS: [&str; 15] = [
+/// 66), `rule_test` (ruling 54), `backfill` (ruling 77) and `query`, a
+/// person's console statement (rulings 80 and 84).
+pub const KINDS: [&str; 16] = [
     "catalog",
     "tables",
     "map",
@@ -39,6 +40,7 @@ pub const KINDS: [&str; 15] = [
     "slas",
     "maintain",
     "reindex",
+    "query",
 ];
 
 /// A name the core gives a dataset or a source: `[a-z0-9_]`, 1 to 63.

@@ -77,11 +77,9 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             if let Err(o) = learn(bundle, st, &answer, &mut known) {
                 return failed(trail, st, o);
             }
-            if matches!(st.expects, Expects::Values { .. }) {
-                // Before its progress: a repeated attempt reads it again.
-                if let Err(o) = self.post_rows(job, &st.id, &answer.rows, ctx).await {
-                    return failed(trail, st, o);
-                }
+            // Before its progress: a repeated attempt reads it again.
+            if let Err(o) = self.values(job, st, &answer, ctx).await {
+                return failed(trail, st, o);
             }
             trail.done(&st.id, &st.expects, &answer.rows);
             ctx.progress(Some(fraction(i + 1, total)), Some(&known.detail(i + 1)));
@@ -211,7 +209,7 @@ fn stage(expects: &Expects) -> &'static str {
     match expects {
         Expects::Count { .. } => "write",
         Expects::Rows { .. } => "read",
-        Expects::Values { .. } => "values",
+        Expects::Values { .. } | Expects::Text { .. } => "values",
         Expects::Done => "layout",
     }
 }

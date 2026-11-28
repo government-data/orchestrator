@@ -52,6 +52,12 @@ pub enum Expects {
         columns: Vec<(String, String)>,
         max_rows: u64,
     },
+    /// A values read whose columns come with its answer (ruling 84: a
+    /// console statement's): at most `max_rows` (never above
+    /// [`MAX_VALUES_ROWS`]), run as the job's own user; its rows go to the
+    /// core's rows route with the answer's column names, every value as
+    /// text.
+    Text { max_rows: u64 },
     /// A statement that changes the catalog or a table's layout: no rows.
     Done,
 }
