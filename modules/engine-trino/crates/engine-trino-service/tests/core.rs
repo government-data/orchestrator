@@ -25,11 +25,8 @@ async fn core() -> HttpCore {
         .route(
             "/oauth/token",
             post(|body: String| async move {
-                let aud = if body.contains("audience=quality-grants") {
-                    "g"
-                } else {
-                    "m"
-                };
+                assert!(body.contains("audience=core"), "ruling 97: {body}");
+                let aud = "m";
                 Json(json!({"access_token": aud, "expires_in": 300}))
             }),
         )

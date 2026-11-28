@@ -28,15 +28,15 @@ requires:
       protocols: [engine-port/1]
 
 # The runners and the rules service call the engine port and the core's
-# routes with the module's machine client (decision 0009): the job routes
-# with audience `quality-jobs`, the job grants
-# (`GET /internal/quality/v1/job-grants`) with `quality-grants`. The two
-# audiences are declared here once quality-sdk's manifest has the field
-# (rulings of 2026-11-25); the orchestrator records which module carries
-# `trino`.
+# routes with the module's machine client (decision 0009): the engine port
+# for the capability `orchestration`, and every core route under
+# `/internal/quality/v1` (the job routes and the job grants) with the
+# audience `core` (core decision 0090, rulings 94 and 97); the orchestrator
+# records which module carries `trino`.
 oidc:
   machine:
     capabilities: [orchestration]
+    audiences: [core]
 
 # Generated once by the installation, never written by a person: the
 # coordinator's internal shared secret and its lake user's keys, under the
