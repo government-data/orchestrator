@@ -4,7 +4,8 @@
 //!
 //! The core's routes (on its `internal` entry point, under `CORE_URL`),
 //! each called with a machine token of the module's OIDC client for the
-//! audience `quality-jobs` (client credentials at the provider):
+//! audience `core` (core decision 0090, ruling 97; client credentials at
+//! the provider):
 //!
 //! | Call | Answer |
 //! | --- | --- |
@@ -14,7 +15,7 @@
 //! | `POST /internal/quality/v1/runs/{run}/rows` `{statement, columns?, rows}` | `204`; a values read's rows, before the report (`columns`, the answer's names, for a text read only) |
 //! | `POST /internal/quality/v1/runs/{run}/document` | `{"document"}` once; `410 gone` after (an `entity_key` run's typed document, never logged) |
 //! | `POST /internal/quality/v1/runs/{run}/report` `{digest, state, statements, snapshots, error_class?}` | `204`; `409 already_reported` when kept before |
-//! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
+//! | `GET /internal/quality/v1/job-grants` | `{"grants": [<neutral grant>…]}` |
 //!
 //! The provider's keys are its JWKS (`<issuer>/oauth/jwks`).
 
@@ -67,10 +68,11 @@ impl std::fmt::Debug for MachineClient {
     }
 }
 
-/// The audience of the core's job routes.
-pub const JOBS_AUDIENCE: &str = "quality-jobs";
-/// The audience of the core's job grants route (ruling of 2026-11-25).
-pub const GRANTS_AUDIENCE: &str = "quality-grants";
+/// The audience of the core's job routes (core decision 0090, ruling 97:
+/// every `/internal/quality/v1/*` call).
+pub const JOBS_AUDIENCE: &str = "core";
+/// The audience of the core's job grants route, the same (ruling 97).
+pub const GRANTS_AUDIENCE: &str = JOBS_AUDIENCE;
 
 /// The core's routes for the job runner and the rules service.
 #[derive(Debug, Clone)]

@@ -164,3 +164,23 @@ fn errors_are_classed_by_name() {
     assert_eq!(class("SYNTAX_ERROR").class, "syntax_error");
     assert_eq!(class("DIVISION_BY_ZERO").class, "statement_failed");
 }
+
+#[test]
+fn a_gold_write_takes_the_lock_the_core_signs_on_its_statement() {
+    // The core's canonical statement (ruling 92(b)): `lock` after
+    // `reads_source`, `only_if_rows` left out when none.
+    let mut p = payload();
+    p["statements"] = json!([{"id": "cells",
+        "sql": "INSERT INTO \"lake\".\"quality_gold\".\"cells\" (dataset) SELECT 1",
+        "expects": {"kind": "count", "update_types": ["INSERT"]},
+        "run_as": "job", "reads_source": false, "lock": "lake.quality_gold.cells"}]);
+    let k = key();
+    let bundle = sign(&p, &k).verify(&keys(&k, "k1"), JOB).unwrap();
+    assert_eq!(
+        bundle.statements[0].lock.as_deref(),
+        Some("lake.quality_gold.cells")
+    );
+    p["statements"][0]["lock"] = json!("\"lake\".\"quality_gold\".\"cells\"");
+    let quoted = sign(&p, &k).verify(&keys(&k, "k1"), JOB);
+    assert_eq!(quoted, Err(BundleRefused::Content), "not a table lock");
+}
