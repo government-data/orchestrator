@@ -13,7 +13,8 @@ use orchestration_model::FinalState;
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::bundle::{Bundle, Expects};
+use crate::bundle::{Bundle, Expects, Statement};
+use crate::check::{as_text, Answer};
 use crate::engine::TrinoEngine;
 use crate::ports::{Core, Delivery, Trino};
 use crate::steps::Known;
@@ -163,16 +164,17 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
     /// while it does not answer; then the run is cut by the system and a
     /// repeated attempt reads them again. A refusal fails it for good. No
     /// row reaches a log: only their statement's id and their count.
-    pub(crate) async fn post_rows(
+    async fn post_rows(
         &self,
         job: &str,
         statement: &str,
+        columns: Option<&[String]>,
         rows: &[Vec<Value>],
         ctx: &RunContext,
     ) -> Result<(), Outcome> {
         let mut wait = self.report_wait;
         for attempt in 1..=TRIES {
-            match self.core.rows(job, statement, rows).await {
+            match self.core.rows(job, statement, columns, rows).await {
                 Ok(Delivery::Kept) => {
                     let n = rows.len();
                     ctx.log(
@@ -193,6 +195,27 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             }
         }
         Err(crate::engine::transient("core_unavailable"))
+    }
+
+    /// A values read's rows to the core: a `values` read's as Trino
+    /// answered them, a `text` read's with its answer's column names and
+    /// every value as text. Nothing for any other statement.
+    pub(crate) async fn values(
+        &self,
+        job: &str,
+        st: &Statement,
+        answer: &Answer,
+        ctx: &RunContext,
+    ) -> Result<(), Outcome> {
+        match st.expects {
+            Expects::Values { .. } => self.post_rows(job, &st.id, None, &answer.rows, ctx).await,
+            Expects::Text { .. } => {
+                let names: Vec<String> = answer.columns.iter().map(|c| c.0.clone()).collect();
+                let rows = as_text(&answer.rows);
+                self.post_rows(job, &st.id, Some(&names), &rows, ctx).await
+            }
+            _ => Ok(()),
+        }
     }
 
     fn undelivered(outcome: Outcome, class: &str) -> Outcome {

@@ -37,8 +37,35 @@ pub fn fits(answer: &Answer, expects: &Expects) -> Option<u64> {
             let n = u64::try_from(answer.rows.len()).ok()?;
             (answer.columns == *columns && n <= *max_rows).then_some(0)
         }
+        Expects::Text { max_rows } => {
+            let n = u64::try_from(answer.rows.len()).ok()?;
+            let names_ok = (1..=MAX_TEXT_COLUMNS).contains(&answer.columns.len())
+                && answer
+                    .columns
+                    .iter()
+                    .all(|c| c.0.chars().count() <= MAX_COLUMN_NAME);
+            let widths = answer.rows.iter().all(|r| r.len() == answer.columns.len());
+            (names_ok && widths && n <= *max_rows).then_some(0)
+        }
         Expects::Done => answer.rows.iter().all(|r| r.len() <= 1).then_some(0),
     }
+}
+
+/// The most columns a text read's answer may have, as the core takes it.
+pub const MAX_TEXT_COLUMNS: usize = 1_000;
+/// The longest column name of a text read's answer the core takes.
+const MAX_COLUMN_NAME: usize = 128;
+
+/// A text read's rows as the core takes them: every value text, or null
+/// (a number or a boolean as Trino wrote it, anything else as its JSON).
+#[must_use]
+pub fn as_text(rows: &[Vec<Value>]) -> Vec<Vec<Value>> {
+    let text = |v: &Value| match v {
+        Value::Null => Value::Null,
+        Value::String(s) => Value::String(s.clone()),
+        other => Value::String(other.to_string()),
+    };
+    rows.iter().map(|r| r.iter().map(text).collect()).collect()
 }
 
 /// How a failed statement ends its run.

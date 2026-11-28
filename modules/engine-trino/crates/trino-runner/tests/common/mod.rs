@@ -95,6 +95,8 @@ pub struct FakeCore {
     pub answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
     /// Each values read's rows sent, with its statement.
     pub rows: Arc<Mutex<Vec<(String, Rows)>>>,
+    /// The column names each rows post carried (a text read's only).
+    pub columns: Arc<Mutex<Vec<Option<Vec<String>>>>>,
     /// What it answers each rows post in turn (`Kept` once these run out).
     pub row_answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
 }
@@ -116,6 +118,7 @@ impl FakeCore {
             reports: Arc::default(),
             answers: Arc::default(),
             rows: Arc::default(),
+            columns: Arc::default(),
             row_answers: Arc::default(),
         }
     }
@@ -149,12 +152,17 @@ impl Core for FakeCore {
         &self,
         _: &str,
         statement: &str,
+        columns: Option<&[String]>,
         rows: &[Vec<Value>],
     ) -> Result<Delivery, CoreError> {
         self.rows
             .lock()
             .unwrap()
             .push((statement.into(), rows.to_vec()));
+        self.columns
+            .lock()
+            .unwrap()
+            .push(columns.map(<[String]>::to_vec));
         let mut answers = self.row_answers.lock().unwrap();
         if answers.is_empty() {
             Ok(Delivery::Kept)
@@ -183,6 +191,8 @@ pub enum Script {
     Count(u64),
     /// A one-row read: its columns (name, type) and its row.
     Read(Vec<(&'static str, &'static str)>, Value),
+    /// A read of several rows: its columns (name, type) and its rows.
+    Table(Vec<(&'static str, &'static str)>, Value),
     /// A `DELETE` that removed this many rows.
     Deleted(u64),
     Fail(&'static str),
@@ -254,6 +264,20 @@ impl Trino for FakeTrino {
                     .map(|(n, t)| (n.to_string(), t.to_string()))
                     .collect(),
                 rows: vec![row.as_array().unwrap().clone()],
+            }),
+            Script::Table(cols, rows) => Ok(Answer {
+                query_id: Some(id),
+                update_type: None,
+                columns: cols
+                    .iter()
+                    .map(|(n, t)| (n.to_string(), t.to_string()))
+                    .collect(),
+                rows: rows
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| r.as_array().unwrap().clone())
+                    .collect(),
             }),
             Script::Deleted(c) => Ok(Answer {
                 query_id: Some(id),

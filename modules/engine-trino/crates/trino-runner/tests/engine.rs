@@ -240,8 +240,8 @@ fn the_descriptor_is_trino_with_one_line_and_the_jobs_kinds() {
         ),
         ("trino", "-", "484")
     );
-    assert_eq!(d.kinds.len(), 15);
-    for kind in ["prepare", "rule_test", "backfill", "tables"] {
+    assert_eq!(d.kinds.len(), 16);
+    for kind in ["prepare", "rule_test", "backfill", "tables", "query"] {
         assert!(d.kinds.iter().any(|k| k.name == kind), "{kind}");
     }
 }

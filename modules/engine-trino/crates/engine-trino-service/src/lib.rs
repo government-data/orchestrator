@@ -11,7 +11,7 @@
 //! | `POST /internal/quality/v1/runs/{run}/bundle` `{kind, dataset?, cut?, source?, attempt}` | `{"job_id", "digest", "bundle": <compact JWS>}` |
 //! | `POST /internal/quality/v1/runs/{run}/trino-token` `{"user": "rules" \| "report" \| "maint" \| "extract" \| "source"}` | `{"access_token": <JWT>, "expires_in"}` |
 //! | `POST /internal/quality/v1/runs/{run}/source-secrets` | `{"current": {<name>: <value>}, "previous": {…} \| null}` |
-//! | `POST /internal/quality/v1/runs/{run}/rows` `{statement, rows}` | `204`; a values read's rows, before the report |
+//! | `POST /internal/quality/v1/runs/{run}/rows` `{statement, columns?, rows}` | `204`; a values read's rows, before the report (`columns`, the answer's names, for a text read only) |
 //! | `POST /internal/quality/v1/runs/{run}/report` `{digest, state, statements, snapshots, error_class?}` | `204`; `409 already_reported` when kept before |
 //! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
@@ -284,9 +284,13 @@ impl Core for HttpCore {
         &self,
         job: &str,
         statement: &str,
+        columns: Option<&[String]>,
         rows: &[Vec<Value>],
     ) -> Result<Delivery, CoreError> {
-        let body = json!({"statement": statement, "rows": rows});
+        let mut body = json!({"statement": statement, "rows": rows});
+        if let Some(names) = columns {
+            body["columns"] = json!(names);
+        }
         self.post_kept(&run_path(job, "rows")?, &body, false).await
     }
 

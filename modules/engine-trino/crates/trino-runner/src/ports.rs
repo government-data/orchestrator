@@ -124,11 +124,14 @@ pub trait Core: Send + Sync + 'static {
     /// The secrets of the source the job reads (none for most kinds).
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError>;
     /// The rows of the values read `statement` (ruling 79), kept by the
-    /// core before the run reports; an error is a core that did not answer.
+    /// core before the run reports; `columns` are the answer's column
+    /// names for a text read (ruling 84), none for a values read. An error
+    /// is a core that did not answer.
     async fn rows(
         &self,
         job: &str,
         statement: &str,
+        columns: Option<&[String]>,
         rows: &[Vec<serde_json::Value>],
     ) -> Result<Delivery, CoreError>;
     /// The run's report (ruling 75); an error is a core that did not

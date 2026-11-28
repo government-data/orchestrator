@@ -145,14 +145,27 @@ async fn rows_go_to_their_route_and_after_the_report_are_refused() {
     ])
     .await;
     let rows = vec![vec![json!("Synthetic"), json!(1)]];
-    assert_eq!(c.rows(RUN, "page", &rows).await.unwrap(), Delivery::Kept);
+    assert_eq!(c.rows(RUN, "page", None, &rows).await.unwrap(), Delivery::Kept);
     assert_eq!(
-        c.rows(RUN, "page", &rows).await.unwrap(),
+        c.rows(RUN, "page", None, &rows).await.unwrap(),
         Delivery::Refused("already_reported".into())
     );
     let seen = seen.lock().unwrap();
     assert_eq!(
         seen[0].2,
         json!({"statement": "page", "rows": [["Synthetic", 1]]})
+    );
+}
+
+#[tokio::test]
+async fn a_text_reads_rows_carry_their_answers_columns() {
+    let (c, seen) = core(vec![(204, Value::Null)]).await;
+    let names = vec!["region".to_string(), "n".to_string()];
+    let rows = vec![vec![json!("north"), json!("4")]];
+    let kept = c.rows(RUN, "result", Some(&names), &rows).await.unwrap();
+    assert_eq!(kept, Delivery::Kept);
+    assert_eq!(
+        seen.lock().unwrap()[0].2,
+        json!({"statement": "result", "columns": ["region", "n"], "rows": [["north", "4"]]})
     );
 }
