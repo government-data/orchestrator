@@ -22,9 +22,10 @@ use crate::report::Trail;
 use crate::steps::Known;
 
 /// The job kinds of core decision 0090 (point 2), with `prepare` (ruling
-/// 66), `rule_test` (ruling 54), `backfill` (ruling 77) and `query`, a
-/// person's console statement (rulings 80 and 84).
-pub const KINDS: [&str; 16] = [
+/// 66), `rule_test` (ruling 54), `backfill` (ruling 77), `query`, a
+/// person's console statement (rulings 80 and 84), and `entity_key`, a
+/// person's lookup by a typed document (rulings 81, 85 and 102).
+pub const KINDS: [&str; 17] = [
     "catalog",
     "tables",
     "map",
@@ -41,6 +42,7 @@ pub const KINDS: [&str; 16] = [
     "maintain",
     "reindex",
     "query",
+    "entity_key",
 ];
 
 /// A name the core gives a dataset or a source: `[a-z0-9_]`, 1 to 63.
@@ -225,13 +227,17 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
             }
             lap("previous_query");
         }
+        let texts = match self.texts(&job, &bundle).await {
+            Ok(t) => t,
+            Err(o) => return o,
+        };
         let (from, known) =
             Known::parse(run.resume.as_ref().and_then(|r| r.last_detail.as_deref()));
         let mut trail = Trail::default();
         let held = Arc::default();
         let mut locks = Locks::new(&bundle, ctx, self.lock_wait, Arc::clone(&held));
         let outcome = tokio::select! {
-            o = self.statements(&job, &bundle, (from, known), &token, &mut locks, &mut trail) => o,
+            o = self.statements(&job, &bundle, (from, known, texts), &token, &mut locks, &mut trail) => o,
             () = cancel.notified() => {
                 give_back(ctx, &held).await;
                 return Outcome::cancelled();

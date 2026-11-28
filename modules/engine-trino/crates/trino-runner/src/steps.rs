@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::bundle::{Bundle, Expects, PlaceholderType};
 use crate::check::Answer;
+use crate::document::Texts;
 
 /// The longest progress detail the engine port takes.
 const MAX_DETAIL: usize = 200;
@@ -24,6 +25,10 @@ const MAX_DETAIL: usize = 200;
 fn is_count(e: &Expects) -> bool {
     matches!(e, Expects::Rows { columns, max_rows: 1 }
         if columns.len() == 1 && columns[0].1 == "bigint")
+}
+
+fn is_values(e: &Expects) -> bool {
+    matches!(e, Expects::Values { .. } | Expects::Text { .. })
 }
 
 fn one_row_with(e: &Expects, column: &str) -> bool {
@@ -51,20 +56,29 @@ pub(crate) fn check(bundle: &Bundle) -> Result<(), &'static str> {
         .enumerate()
         .map(|(i, s)| (s.id.as_str(), i))
         .collect();
-    let mut declared = BTreeMap::new();
+    // Each placeholder's source statement; none for the document.
+    let mut declared: BTreeMap<&str, Option<usize>> = BTreeMap::new();
     for p in &bundle.placeholders {
-        let source = index
-            .get(p.from.statement.as_str())
-            .ok_or("unknown source")?;
         let ok_name = !p.name.is_empty()
             && p.name.len() <= 64
             && p.name
                 .bytes()
                 .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
-        if !ok_name || !one_row_with(&bundle.statements[*source].expects, &p.from.column) {
+        let source = match (p.kind, &p.from) {
+            (PlaceholderType::Text, None) if bundle.kind == crate::document::ENTITY_KEY => None,
+            (PlaceholderType::Text, _) | (_, None) => return Err("bad placeholder"),
+            (_, Some(from)) => {
+                let source = *index.get(from.statement.as_str()).ok_or("unknown source")?;
+                if !one_row_with(&bundle.statements[source].expects, &from.column) {
+                    return Err("bad placeholder");
+                }
+                Some(source)
+            }
+        };
+        if !ok_name {
             return Err("bad placeholder");
         }
-        if declared.insert(p.name.as_str(), *source).is_some() {
+        if declared.insert(p.name.as_str(), source).is_some() {
             return Err("placeholder declared twice");
         }
     }
@@ -97,8 +111,10 @@ pub(crate) fn check(bundle: &Bundle) -> Result<(), &'static str> {
         }
         for t in tokens(&st.sql).ok_or("unclosed token")? {
             match declared.get(t) {
-                Some(source) if *source < i => {}
-                _ => return Err("undeclared or later token"),
+                Some(Some(source)) if *source < i => {}
+                // The document goes only into a values read.
+                Some(None) if is_values(&st.expects) => {}
+                _ => return Err("undeclared, later or misplaced token"),
             }
         }
     }
@@ -165,16 +181,21 @@ pub(crate) fn column<'a>(answer: &'a Answer, column: &str) -> Option<&'a Value> 
     }
 }
 
-/// `sql` with each token replaced by its known value; `None` if one is
-/// not known.
-pub(crate) fn fill(sql: &str, known: &Known) -> Option<String> {
+/// `sql` with each token replaced by its known value, or a `text` one by
+/// its literal; `None` if one is not known.
+pub(crate) fn fill(sql: &str, known: &Known, texts: &Texts) -> Option<String> {
     let mut out = String::with_capacity(sql.len());
     let mut rest = sql;
     while let Some(start) = rest.find("{{") {
         out.push_str(&rest[..start]);
         let after = &rest[start + 2..];
         let end = after.find("}}")?;
-        out.push_str(known.0.get(&after[..end])?);
+        let name = &after[..end];
+        out.push_str(
+            texts
+                .get(name)
+                .or_else(|| known.0.get(name).map(String::as_str))?,
+        );
         rest = &after[end + 2..];
     }
     out.push_str(rest);

@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use crate::bundle::{Bundle, Expects, PlaceholderType, RunAs, Statement};
 use crate::check::{class, fits, Answer};
+use crate::document::Texts;
 use crate::engine::{transient, TrinoEngine};
 use crate::locks::Locks;
 use crate::ports::{Core, Trino, TrinoUser};
@@ -21,7 +22,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         &self,
         job: &str,
         bundle: &Bundle,
-        (from, mut known): (usize, Known),
+        (from, mut known, texts): (usize, Known, Texts),
         token: &str,
         locks: &mut Locks<'_>,
         trail: &mut Trail,
@@ -61,7 +62,7 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
                 },
             };
             let clock = Instant::now();
-            let answer = match self.step(job, st, &known, &token, ctx).await {
+            let answer = match self.step(job, st, (&known, &texts), &token, ctx).await {
                 Ok(a) => a,
                 Err(o) => return failed(trail, st, o),
             };
@@ -116,11 +117,11 @@ impl<C: Core, T: Trino> TrinoEngine<C, T> {
         &self,
         job: &str,
         st: &Statement,
-        known: &Known,
+        (known, texts): (&Known, &Texts),
         token: &str,
         ctx: &RunContext,
     ) -> Result<Answer, Outcome> {
-        let Some(sql) = fill(&st.sql, known) else {
+        let Some(sql) = fill(&st.sql, known, texts) else {
             return Err(Outcome::failed("step_value_missing"));
         };
         ctx.log(LogStream::System, &format!("statement {} started", st.id));
@@ -249,12 +250,13 @@ fn learn(
         let n = n.ok_or_else(|| Outcome::failed("step_value_invalid"))?;
         known.0.insert(format!("c.{}", st.id), n.to_string());
     }
-    for p in bundle
+    for (p, from) in bundle
         .placeholders
         .iter()
-        .filter(|p| p.from.statement == st.id)
+        .filter_map(|p| Some((p, p.from.as_ref()?)))
+        .filter(|(_, from)| from.statement == st.id)
     {
-        let value = column(answer, &p.from.column)
+        let value = column(answer, &from.column)
             .and_then(|v| checked(v, p.kind))
             .ok_or_else(|| Outcome::failed("step_value_invalid"))?;
         known.0.insert(p.name.clone(), value);

@@ -12,7 +12,8 @@ use axum::{Json, Router};
 use engine_trino_service::{HttpCore, MachineClient};
 use serde_json::{json, Value};
 use trino_runner::{
-    Core, Delivery, ReportState, RunReport, SnapshotFilled, StatementReport, StatementState,
+    Core, Delivery, Document, ReportState, RunReport, SnapshotFilled, StatementReport,
+    StatementState,
 };
 
 const RUN: &str = "00000000-0000-4000-8000-00000000000a";
@@ -46,6 +47,16 @@ async fn core(answers: Vec<(u16, Value)>) -> (HttpCore, Seen) {
                  Path(run): Path<String>,
                  Json(body): Json<Value>| async move {
                     seen.lock().unwrap().push((run, "rows".into(), body));
+                    let (code, answer) = answers.lock().unwrap().remove(0);
+                    (StatusCode::from_u16(code).unwrap(), Json(answer))
+                },
+            ),
+        )
+        .route(
+            "/api/internal/quality/v1/runs/{run}/document",
+            post(
+                |State((seen, answers)): State<(Seen, Answers)>, Path(run): Path<String>| async move {
+                    seen.lock().unwrap().push((run, "document".into(), Value::Null));
                     let (code, answer) = answers.lock().unwrap().remove(0);
                     (StatusCode::from_u16(code).unwrap(), Json(answer))
                 },
@@ -171,4 +182,23 @@ async fn a_text_reads_rows_carry_their_answers_columns() {
         seen.lock().unwrap()[0].2,
         json!({"statement": "result", "columns": ["region", "n"], "rows": [["north", "4"]]})
     );
+}
+
+#[tokio::test]
+async fn the_document_is_given_once_then_gone_and_no_error_shows_it() {
+    let (c, seen) = core(vec![
+        (200, json!({"document": "90'7319"})),
+        (410, json!({"error": "gone"})),
+        (200, json!({"document": 907_319})),
+        (503, json!({"error": "internal"})),
+    ])
+    .await;
+    let given = c.document(RUN).await.unwrap();
+    assert_eq!(given, Some(Document::new("90'7319".into())));
+    assert_eq!(c.document(RUN).await.unwrap(), None, "410: given before");
+    let shape = c.document(RUN).await.unwrap_err();
+    assert!(!format!("{shape:?}").contains("7319"), "{shape:?}");
+    assert!(c.document(RUN).await.is_err(), "503: asked again");
+    assert!(c.document("../x").await.is_err(), "not a run id");
+    assert_eq!(seen.lock().unwrap()[0].0, RUN);
 }

@@ -12,6 +12,7 @@
 //! | `POST /internal/quality/v1/runs/{run}/trino-token` `{"user": "rules" \| "report" \| "maint" \| "extract" \| "source"}` | `{"access_token": <JWT>, "expires_in"}` |
 //! | `POST /internal/quality/v1/runs/{run}/source-secrets` | `{"current": {<name>: <value>}, "previous": {…} \| null}` |
 //! | `POST /internal/quality/v1/runs/{run}/rows` `{statement, columns?, rows}` | `204`; a values read's rows, before the report (`columns`, the answer's names, for a text read only) |
+//! | `POST /internal/quality/v1/runs/{run}/document` | `{"document"}` once; `410 gone` after (an `entity_key` run's typed document, never logged) |
 //! | `POST /internal/quality/v1/runs/{run}/report` `{digest, state, statements, snapshots, error_class?}` | `204`; `409 already_reported` when kept before |
 //! | `GET /internal/quality/v1/job-grants` (audience `quality-grants`) | `{"grants": [<neutral grant>…]}` |
 //!
@@ -26,8 +27,8 @@ use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use trino_client::TrinoClient;
 use trino_runner::{
-    Answer, Core, CoreError, Credential, Delivery, JobRequest, Keys, RunReport, SignedBundle,
-    Trino, TrinoFailure, TrinoUser,
+    Answer, Core, CoreError, Credential, Delivery, Document, JobRequest, Keys, RunReport,
+    SignedBundle, Trino, TrinoFailure, TrinoUser,
 };
 
 pub mod guard;
@@ -292,6 +293,37 @@ impl Core for HttpCore {
             body["columns"] = json!(names);
         }
         self.post_kept(&run_path(job, "rows")?, &body, false).await
+    }
+
+    async fn document(&self, job: &str) -> Result<Option<Document>, CoreError> {
+        let path = run_path(job, "document")?;
+        let res = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .bearer_auth(self.machine_token(JOBS_AUDIENCE).await?)
+            .json(&json!({}))
+            .send()
+            .await
+            .map_err(|e| failed("document", e))?;
+        match res.status().as_u16() {
+            410 => return Ok(None),
+            s if !res.status().is_success() => {
+                return Err(CoreError(format!("document: HTTP {s}")));
+            }
+            _ => {}
+        }
+        // A fixed error only: nothing of the answer reaches a log.
+        let v: Value = res
+            .json()
+            .await
+            .map_err(|_| CoreError("document: shape".into()))?;
+        match v {
+            Value::Object(mut o) => match o.remove("document") {
+                Some(Value::String(d)) => Ok(Some(Document::new(d))),
+                _ => Err(CoreError("document: shape".into())),
+            },
+            _ => Err(CoreError("document: shape".into())),
+        }
     }
 
     async fn credentials(&self, job: &str) -> Result<Vec<Credential>, CoreError> {

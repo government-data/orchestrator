@@ -6,6 +6,7 @@ use async_trait::async_trait;
 
 use crate::bundle::{Keys, SignedBundle};
 use crate::check::Answer;
+use crate::document::Document;
 use crate::report::RunReport;
 
 /// The core could not answer (a class, never a body).
@@ -134,6 +135,9 @@ pub trait Core: Send + Sync + 'static {
         columns: Option<&[String]>,
         rows: &[Vec<serde_json::Value>],
     ) -> Result<Delivery, CoreError>;
+    /// The run's typed document (ruling 102), given once: `None` once the
+    /// core has given it (`410 gone`). Never logged or kept.
+    async fn document(&self, job: &str) -> Result<Option<Document>, CoreError>;
     /// The run's report (ruling 75); an error is a core that did not
     /// answer, and the report is sent again.
     async fn report(&self, job: &str, report: &RunReport) -> Result<Delivery, CoreError>;
