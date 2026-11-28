@@ -11,8 +11,8 @@ use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 use trino_runner::{
-    digest_hex, Answer, Core, CoreError, Credential, Delivery, JobRequest, Keys, RunReport,
-    SignedBundle, Trino, TrinoFailure, TrinoUser, BUNDLE_TYP,
+    digest_hex, Answer, Core, CoreError, Credential, Delivery, Document, JobRequest, Keys,
+    RunReport, SignedBundle, Trino, TrinoFailure, TrinoUser, BUNDLE_TYP,
 };
 
 /// A values read's rows.
@@ -95,6 +95,10 @@ pub struct FakeCore {
     pub answers: Arc<Mutex<Vec<Result<Delivery, CoreError>>>>,
     /// Each values read's rows sent, with its statement.
     pub rows: Arc<Mutex<Vec<(String, Rows)>>>,
+    /// The run's document, given once.
+    pub document: Arc<Mutex<Option<String>>>,
+    /// How many times the document was asked.
+    pub document_asks: Arc<Mutex<u32>>,
     /// The column names each rows post carried (a text read's only).
     pub columns: Arc<Mutex<Vec<Option<Vec<String>>>>>,
     /// What it answers each rows post in turn (`Kept` once these run out).
@@ -119,6 +123,8 @@ impl FakeCore {
             answers: Arc::default(),
             rows: Arc::default(),
             columns: Arc::default(),
+            document: Arc::default(),
+            document_asks: Arc::default(),
             row_answers: Arc::default(),
         }
     }
@@ -169,6 +175,11 @@ impl Core for FakeCore {
         } else {
             answers.remove(0)
         }
+    }
+    async fn document(&self, _: &str) -> Result<Option<Document>, CoreError> {
+        let mut given = self.document.lock().unwrap();
+        *self.document_asks.lock().unwrap() += 1;
+        Ok(given.take().map(Document::new))
     }
     async fn report(&self, run: &str, report: &RunReport) -> Result<Delivery, CoreError> {
         self.reports

@@ -109,13 +109,16 @@ pub struct OnlyIfRows {
     pub after: String,
 }
 
-/// A placeholder's type: both are decimal integers of at most 19 digits;
-/// only a `bigint` may be negative. There is no text type.
+/// A placeholder's type: a snapshot id or a `bigint`, decimal integers of
+/// at most 19 digits filled from an earlier answer (only a `bigint` may be
+/// negative), or `text`, an entity lookup's typed document (rulings 81 and
+/// 102), filled from the run's document route as a quoted literal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlaceholderType {
     SnapshotId,
     Bigint,
+    Text,
 }
 
 /// Where a placeholder's value comes from: a column of an earlier
@@ -134,7 +137,9 @@ pub struct Placeholder {
     pub name: String,
     #[serde(rename = "type")]
     pub kind: PlaceholderType,
-    pub from: Source,
+    /// Where an answer fills it; none for a `text` placeholder.
+    #[serde(default)]
+    pub from: Option<Source>,
 }
 
 impl std::fmt::Debug for Statement {
@@ -162,7 +167,8 @@ pub struct Bundle {
     pub catalog_commit: Option<String>,
     pub compiler_version: String,
     pub statements: Vec<Statement>,
-    /// The tokens its statements hold, each filled from an earlier answer.
+    /// The tokens its statements hold, each filled from an earlier answer
+    /// or, for a `text` one, from the run's document.
     #[serde(default)]
     pub placeholders: Vec<Placeholder>,
 }
