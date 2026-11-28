@@ -145,7 +145,10 @@ async fn rows_go_to_their_route_and_after_the_report_are_refused() {
     ])
     .await;
     let rows = vec![vec![json!("Synthetic"), json!(1)]];
-    assert_eq!(c.rows(RUN, "page", None, &rows).await.unwrap(), Delivery::Kept);
+    assert_eq!(
+        c.rows(RUN, "page", None, &rows).await.unwrap(),
+        Delivery::Kept
+    );
     assert_eq!(
         c.rows(RUN, "page", None, &rows).await.unwrap(),
         Delivery::Refused("already_reported".into())

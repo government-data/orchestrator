@@ -80,7 +80,10 @@ async fn a_console_statement_posts_its_columns_and_text_and_reports_none() {
     assert_eq!((st.state, st.rows.is_none()), (StatementState::Done, true));
     let report = serde_json::to_string(&reports[0].1).unwrap();
     assert!(!report.contains(REGION), "no value in the report");
-    assert!(r.logs.iter().all(|l| !l.line.contains(REGION)), "no value logged");
+    assert!(
+        r.logs.iter().all(|l| !l.line.contains(REGION)),
+        "no value logged"
+    );
 }
 
 #[tokio::test]
@@ -89,7 +92,12 @@ async fn a_text_read_beyond_the_cores_bounds_runs_nothing() {
     as_report["statements"][0]["run_as"] = json!("report");
     let mut with_columns = console(10);
     with_columns["statements"][0]["expects"]["columns"] = json!([["region", "varchar"]]);
-    for payload in [console(MAX_VALUES_ROWS + 1), console(0), as_report, with_columns] {
+    for payload in [
+        console(MAX_VALUES_ROWS + 1),
+        console(0),
+        as_report,
+        with_columns,
+    ] {
         let (runner, fake, trino) = setup(FakeCore::new(payload, vec![]));
         let run = fake.queue_run("query", json!({}));
         run_one(&runner).await;
@@ -108,7 +116,10 @@ async fn more_rows_than_the_text_read_takes_send_nothing() {
     let r = fake.run(&run).unwrap();
     assert_eq!(r.error_class.as_deref(), Some("unexpected_answer"));
     assert!(core.rows.lock().unwrap().is_empty());
-    assert!(r.logs.iter().all(|l| !l.line.contains(REGION)), "no value logged");
+    assert!(
+        r.logs.iter().all(|l| !l.line.contains(REGION)),
+        "no value logged"
+    );
 }
 
 #[test]
