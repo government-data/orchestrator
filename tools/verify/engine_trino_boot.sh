@@ -7,13 +7,16 @@
 # three catalogs over RustFS 1.0.5. Checks:
 #   - it starts, and every rendered setting is accepted;
 #   - a token's subject becomes the user of its kind (`job:…:rules:loans`
-#     is job_rules_loans, `person-<uuid>` itself); a look-alike, another
-#     audience and another issuer are refused;
+#     is job_rules_loans, `person-<uuid>` itself; a console's or a lookup's
+#     run, `job:…:console:r<32 hex>`, is job_console_r<hex>); a look-alike,
+#     a console subject with a dataset's name, another audience and another
+#     issuer are refused;
 #   - each user lands in its resource group; a rule user's SELECT is in
 #     `reject` and does not run; extract, source and sample users have
-#     their own groups, apart from `rules` (ruling 93);
-#   - the session property manager sets the BI, extract and source/sample
-#     groups' limits;
+#     their own groups, apart from `rules` (ruling 93); console and lookup
+#     users theirs (rulings 84 and 102);
+#   - the session property manager sets the BI, extract, source/sample and
+#     console/lookup groups' limits;
 #   - RE2J is the regular expression library; spill is on;
 #   - `gold` refuses a write; `lake` takes one.
 #
@@ -48,12 +51,21 @@ rules=$(et_token "job:00000000-0000-4000-8000-00000000000a:rules:loans")
 extract=$(et_token "job:00000000-0000-4000-8000-00000000000a:extract:loans")
 source_=$(et_token "job:00000000-0000-4000-8000-00000000000a:source:crm")
 sample=$(et_token "job:00000000-0000-4000-8000-00000000000a:sample:loans")
+RUN=r0000000000004000800000000000000a
+console=$(et_token "job:00000000-0000-4000-8000-00000000000a:console:$RUN")
+lookup=$(et_token "job:00000000-0000-4000-8000-00000000000a:lookup:$RUN")
 tq_ok "qd-admin runs a statement" "$admin" "SELECT 1"
 expect "a person's user" '[["person-00000000-0000-4000-8000-000000000001"]]' "$(tq "$person" 'SELECT current_user')"
 tq_refused "a rule job's SELECT is not run (reject group)" "$rules" "SELECT 1" "failed"
 tq_ok "an extract job runs a statement" "$extract" "SELECT 1"
 tq_ok "a source job runs a statement" "$source_" "SELECT 1"
 tq_ok "a sample job runs a statement" "$sample" "SELECT 1"
+expect "a console run's user" "[[\"job_console_$RUN\"]]" "$(tq "$console" 'SELECT current_user')"
+expect "a lookup run's user" "[[\"job_lookup_$RUN\"]]" "$(tq "$lookup" 'SELECT current_user')"
+tq_refused "a console subject with a dataset's name" \
+  "$(et_token job:00000000-0000-4000-8000-00000000000a:console:loans)" "SELECT 1" "http 401"
+tq_refused "a lookup subject with a short run" \
+  "$(et_token job:00000000-0000-4000-8000-00000000000a:lookup:r0a)" "SELECT 1" "http 401"
 tq_refused "a look-alike subject" "$(et_token job_rules_loans)" "SELECT 1" "http 401"
 tq_refused "another audience" "$(et_token qd-admin other)" "SELECT 1" "http 401"
 tq_refused "another issuer" "$(et_token qd-admin trino https://other.test)" "SELECT 1" "http 401"
@@ -68,6 +80,8 @@ jobs=$(tq "$admin" "SELECT user, resource_group_id FROM system.runtime.queries
 expect_match "an extract job's group" '"job_extract_loans",\["global","extract"\]' "$jobs"
 expect_match "a source job's group" '"job_source_crm",\["global","source"\]' "$jobs"
 expect_match "a sample job's group" '"job_sample_loans",\["global","sample"\]' "$jobs"
+expect_match "a console run's group" "\"job_console_$RUN\",\\[\"global\",\"console\"\\]" "$jobs"
+expect_match "a lookup run's group" "\"job_lookup_$RUN\",\\[\"global\",\"lookup\"\\]" "$jobs"
 expect_match "a rule job's SELECT stays in reject" '"job_rules_loans",\["global","reject"\]' "$jobs"
 # The session the manager gave a user's query, read from its query info.
 session_of() { # USER-LIKE
@@ -85,6 +99,10 @@ expect_match "a source job's session limits (tier xs)" \
   "'query_max_memory': '256MB'" "$(session_of 'job_source_%')"
 expect_match "a sample job's session limits (tier xs)" \
   "'query_max_memory': '256MB'" "$(session_of 'job_sample_%')"
+expect_match "a console run's session limits (tier xs)" \
+  "'query_max_memory': '256MB'" "$(session_of 'job_console_%')"
+expect_match "a lookup run's session limits (tier xs)" \
+  "'query_max_memory': '256MB'" "$(session_of 'job_lookup_%')"
 tq_refused "RE2J: a backreference is refused" "$admin" "SELECT regexp_like('aa', '(a)\\1')" "failed"
 expect "spill on" "spill-enabled=true" \
   "$(docker exec "$P-coordinator" cat /data/trino/etc/config.properties | grep -o 'spill-enabled=true')"

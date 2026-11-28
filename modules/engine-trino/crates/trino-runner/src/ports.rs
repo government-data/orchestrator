@@ -59,6 +59,13 @@ pub enum TrinoUser {
     Source,
     /// Reads its dataset's silver for samples (a `test_rule`).
     Sample,
+    /// One console statement's run (`job_console_r<run hex>`): reads the
+    /// bronze, silver and gold of the datasets its asker may view (core
+    /// decision 0090, ruling 84).
+    Console,
+    /// One entity key lookup's run (`job_lookup_r<run hex>`): reads the
+    /// findings key and gold's `entity_icd` only (ruling 102).
+    Lookup,
 }
 
 impl TrinoUser {
@@ -72,6 +79,8 @@ impl TrinoUser {
             Self::Extract => "extract",
             Self::Source => "source",
             Self::Sample => "sample",
+            Self::Console => "console",
+            Self::Lookup => "lookup",
         }
     }
 
@@ -85,6 +94,9 @@ impl TrinoUser {
             "extract" => Some(Self::Extract),
             "tables" | "map" | "records" => Some(Self::Source),
             "test_rule" => Some(Self::Sample),
+            // The core's kind for a console statement.
+            "query" => Some(Self::Console),
+            "entity_key" => Some(Self::Lookup),
             _ => None,
         }
     }

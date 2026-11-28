@@ -123,12 +123,26 @@ pub(crate) fn subject(s: &str) -> Option<Subject> {
         return Some(Subject::Job { maint: false });
     }
     let (kind, name) = rest.split_once('_')?;
-    let known = matches!(
-        kind,
-        "rules" | "report" | "extract" | "sample" | "maint" | "source"
-    );
-    (known && is_name(name)).then_some(Subject::Job {
+    let known = match kind {
+        "rules" | "report" | "extract" | "sample" | "maint" | "source" => is_name(name),
+        // One run's own user (rulings 84 and 102): `r` and the run's 32 hex
+        // digits, as Trino's user mapping takes it.
+        "console" | "lookup" => is_run(name),
+        _ => false,
+    };
+    known.then_some(Subject::Job {
         maint: kind == "maint",
+    })
+}
+
+/// A run's target: `r` and 32 lower-case hex digits (core decision 0090,
+/// rulings 84 and 102).
+fn is_run(s: &str) -> bool {
+    s.strip_prefix('r').is_some_and(|hex| {
+        hex.len() == 32
+            && hex
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
     })
 }
 

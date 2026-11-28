@@ -22,7 +22,7 @@
     }
   },
   {
-    "group": "global\\.(source|sample)",
+    "group": "global\\.(source|sample|console|lookup)",
     "sessionProperties": {
       "query_max_memory": "@READ_MEMORY@",
       "query_max_total_memory": "@READ_MEMORY@",

@@ -225,3 +225,34 @@ fn a_maintenance_user_owns_the_tables_of_its_own_bronze_and_silver() {
         );
     }
 }
+
+#[test]
+fn a_console_or_lookup_run_user_is_taken_only_by_its_run_name() {
+    let run = "r0b9c6a1e000040008000000000000091";
+    let g = grants(json!([
+        {"subject": format!("job_console_{run}"), "namespace": "loans_silver", "tables": ["*"],
+         "privileges": ["SELECT"]},
+        {"subject": format!("job_console_{run}"), "namespace": "quality_gold",
+         "tables": ["run_summary"], "privileges": ["SELECT"],
+         "rows": {"column": "dataset", "in": ["loans"]}},
+        {"subject": format!("job_lookup_{run}"), "namespace": "quality_gold",
+         "tables": ["entity_icd"], "privileges": ["SELECT"]},
+        {"subject": "job_console_loans", "namespace": "loans_silver", "tables": ["*"],
+         "privileges": ["SELECT"]},
+        {"subject": "job_lookup_r0B9C6A1E000040008000000000000091", "namespace": "quality_gold",
+         "tables": ["entity_icd"], "privileges": ["SELECT"]},
+        {"subject": "job_lookup_r0b9c6a1e00004000800000000000009", "namespace": "quality_gold",
+         "tables": ["entity_icd"], "privileges": ["SELECT"]}
+    ]));
+    let (doc, invalid) = document(&g, &[]);
+    assert_eq!(invalid.len(), 3, "a dataset name, upper case, 31 digits");
+    let t = tables(&doc);
+    let on = |user: String, schema: &str| {
+        t.iter()
+            .any(|r| r["user"] == user && r["catalog"] == "lake" && r["schema"] == schema)
+    };
+    assert!(on(format!("job_console_{run}"), "loans_silver"));
+    assert!(on(format!("job_console_{run}"), "quality_gold"));
+    assert!(on(format!("job_lookup_{run}"), "quality_gold"));
+    assert!(!doc.to_string().contains("job_console_loans"));
+}

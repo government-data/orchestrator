@@ -8,6 +8,10 @@
       "pattern": "job:[0-9a-f-]{36}:source:([a-z][a-z0-9_]{0,62})",
       "user": "job_source_$1"
     },
+    {
+      "pattern": "job:[0-9a-f-]{36}:(console|lookup):(r[0-9a-f]{32})",
+      "user": "job_$1_$2"
+    },
     { "pattern": "job:[0-9a-f-]{36}:catalog:[a-z][a-z0-9_]{0,62}", "user": "job_catalog" },
     { "pattern": "(person-[0-9a-f-]{36})", "user": "$1" },
     { "pattern": "(bi-superset|qd-admin)", "user": "$1" },
